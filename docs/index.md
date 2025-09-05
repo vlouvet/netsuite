@@ -122,6 +122,50 @@ async def async_main() -> dict:
         asyncio.run(async_main())
 ```
 
+## Programmatic use - Download Large Files Using SOAP API
+When working with large files, you might find that responses are truncated if they exceed 10MB. This limitation stems from the default settings in Zeep. To overcome this, enable the `xml_huge_tree` option in the Zeep client settings.
+
+```python
+ns = NetSuite(config)
+# Enable handling of large XML trees
+ns.soap_api.client.settings.xml_huge_tree = True
+```
+## Programmatic use - Adjusting Cache Settings
+When deploying applications with strict permissions, you might encounter issues related to caching and more specifically to the location where Zeep library is trying to write its cache SQLite database. You can adjust the cache settings by passing a custom cache parameter via `soap_api_options` when initializing the `NetSuite` or `NetSuiteSoapApi` class.
+
+### Option 1 - Change SQLite path
+```python
+from netsuite import NetSuite, Config, TokenAuth
+from zeep.cache import SqliteCache
+
+config = Config(
+    account="12345",
+    auth=TokenAuth(consumer_key="abc", consumer_secret="123", token_id="xyz", token_secret="456"),
+)
+
+# Specify SQLite path in soap_api_options
+soap_api_options = {"cache": SqliteCache(path='/tmp/sqlite.db', timeout=60)}
+
+ns = NetSuite(config, soap_api_options=soap_api_options)
+
+```
+
+### Option-2 Use InMemoryCache
+```python
+from netsuite import NetSuite, Config, TokenAuth
+from zeep.cache import InMemoryCache
+
+config = Config(
+    account="12345",
+    auth=TokenAuth(consumer_key="abc", consumer_secret="123", token_id="xyz", token_secret="456"),
+)
+
+# Specify InMemoryCache in soap_api_options
+soap_api_options = {"cache": InMemoryCache()}
+
+ns = NetSuite(config, soap_api_options=soap_api_options)
+```
+
 ## CLI
 
 ### Configuration
@@ -250,6 +294,11 @@ WARNING:netsuite:Fetching OpenAPI spec for ALL known record types... This will t
 INFO:netsuite:NetSuite REST API docs available at http://127.0.0.1:8001
 ```
 
+You can also pull configuration from your environment:
+
+```shell
+netsuite --config-environment rest-api openapi-serve
+```
 
 ### `interact` - Interact with SOAP/REST web services and restlets
 
@@ -274,6 +323,12 @@ In [1]: rest_api_results = await ns.rest_api.get("
 
 ```
 $ echo '{"savedSearchId": 987}' | netsuite restlet 123 -
+```
+
+### suiteanalytics
+
+```
+brew install unixodbc
 ```
 
 ## Developers

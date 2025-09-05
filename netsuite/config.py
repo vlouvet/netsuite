@@ -1,12 +1,13 @@
 import configparser
 import os
+import re
 import typing as t
 
 from pydantic import BaseModel
 
 from .constants import DEFAULT_INI_PATH, DEFAULT_INI_SECTION
 
-__all__ = ("Config", "TokenAuth")
+__all__ = ("Config", "TokenAuth", "UsernamePasswordAuth")
 
 
 class TokenAuth(BaseModel):
@@ -16,13 +17,39 @@ class TokenAuth(BaseModel):
     token_secret: str
 
 
+class UsernamePasswordAuth(BaseModel):
+    """
+    This is a very old authentication method that is not recommended for use.
+
+    However, it's the only way to access the netsuite.com (NOT netsuite2.com) data source via ODBC.
+    """
+
+    username: str
+    password: str
+
+
 class Config(BaseModel):
     account: str
-    auth: TokenAuth
-    log_level: t.Optional[str] = None
-
+    auth: t.Union[TokenAuth, UsernamePasswordAuth]
     # TODO: Support OAuth2
     # auth: Union[OAuth2, TokenAuth]
+
+    log_level: t.Optional[str] = None
+
+    # TODO ODBC is not yet fully supported, but this is the first step
+    odbc_data_source: t.Literal["NetSuite.com", "NetSuite2.com"] = "NetSuite.com"
+
+    @property
+    def is_token_auth(self) -> bool:
+        return isinstance(self.auth, TokenAuth)
+
+    @property
+    def is_sandbox(self) -> bool:
+        return re.search(r"_SB[\d]+$", self.account) is not None
+
+    @property
+    def account_number(self) -> str:
+        return self.account.split("_")[0]
 
     @property
     def account_slugified(self) -> str:
@@ -37,7 +64,10 @@ class Config(BaseModel):
         reorganized: t.Dict[t.Any, t.Any] = {"auth": {}}
 
         for key, val in raw.items():
-            if key in TokenAuth.model_fields:
+            if (
+                key in TokenAuth.model_fields
+                or key in UsernamePasswordAuth.model_fields
+            ):
                 reorganized["auth"][key] = val
             else:
                 reorganized[key] = val
@@ -54,6 +84,8 @@ class Config(BaseModel):
         - `NETSUITE_CONSUMER_SECRET`: The consumer secret for OAuth.
         - `NETSUITE_TOKEN_ID`: The token ID for OAuth.
         - `NETSUITE_TOKEN_SECRET`: The token secret for OAuth.
+        - `NETSUITE_USERNAME`: The username for login auth (only for odbc).
+        - `NETSUITE_PASSWORD`: The password for login auth (only for odbc).
         - `NETSUITE_LOG_LEVEL`: log level for NetSuite debugging
 
         Returns a dictionary of available config options.
@@ -66,6 +98,8 @@ class Config(BaseModel):
             "consumer_secret",
             "token_id",
             "token_secret",
+            "username",
+            "password",
             "log_level",
         ]
         prefix = "NETSUITE_"
