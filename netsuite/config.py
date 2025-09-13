@@ -52,6 +52,10 @@ class Config(BaseModel):
         return self.account.split("_")[0]
 
     @property
+    def wsdl_version(self) -> str:
+        return "2024.2"
+
+    @property
     def account_slugified(self) -> str:
         # https://followingnetsuite.wordpress.com/2018/10/18/suitetalk-sandbox-urls-addendum/
         return self.account.lower().replace("_", "-")
