@@ -13,6 +13,7 @@ def dummy_config():
             "token_id": "abcdefghijklmnopqrstuvwxyz0123456789",
             "token_secret": "abcdefghijklmnopqrstuvwxyz0123456789",
         },
+        wsdl_version="2024.2",
     )
 
 
