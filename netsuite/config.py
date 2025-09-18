@@ -53,7 +53,7 @@ class Config(BaseModel):
 
     @property
     def wsdl_version(self) -> str:
-        return "2024.2"
+        return "2024.2.0"
 
     @property
     def account_slugified(self) -> str:
