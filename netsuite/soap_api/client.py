@@ -1,5 +1,6 @@
 import logging
 import re
+import warnings
 from contextlib import contextmanager
 from datetime import datetime
 from functools import cached_property
@@ -15,6 +16,14 @@ logger = logging.getLogger(__name__)
 __all__ = ("NetSuiteSoapApi",)
 
 
+SOAP_DEPRECATION_MESSAGE = (
+    "NetSuite has announced that SOAP Web Services will be removed in the "
+    "2027.1 release. New integrations should use the REST API with OAuth 2.0 "
+    "(see `netsuite.OAuth2ClientCredentialsAuth`); existing SOAP integrations "
+    "should plan a migration before 2027.1."
+)
+
+
 class NetSuiteSoapApi:
     version = getattr(Config, "wsdl_version", "2021.1.0")
     wsdl_url_tmpl = "https://{account_slug}.suitetalk.api.netsuite.com/wsdl/v{underscored_version}/netsuite.wsdl"
@@ -28,6 +37,11 @@ class NetSuiteSoapApi:
         cache: Optional[zeep.cache.Base] = None,
     ) -> None:
         self._ensure_required_dependencies()
+        warnings.warn(
+            SOAP_DEPRECATION_MESSAGE,
+            DeprecationWarning,
+            stacklevel=2,
+        )
         if version is not None:
             assert re.match(r"\d+\.\d+\.\d+", version)
             self.version = version
