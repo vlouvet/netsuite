@@ -5,29 +5,31 @@ hide:
 
 # netsuite python library
 
-Make async requests to NetSuite SuiteTalk SOAP/REST Web Services and Restlets
+Make async requests to NetSuite SuiteTalk SOAP/REST Web Services and Restlets.
+
+This is an unofficial fork. It is not published to PyPI; install directly from this repository.
 
 ## Installation
 
 With default features (REST API + Restlet support):
 
-    pip install netsuite
+    pip install git+https://github.com/vlouvet/netsuite.git
 
-With Web Services SOAP API support:
+With Web Services SOAP API support (deprecated by NetSuite as of the 2027.1 release):
 
-    pip install netsuite[soap_api]
+    pip install "netsuite[soap_api] @ git+https://github.com/vlouvet/netsuite.git"
 
 With CLI support:
 
-    pip install netsuite[cli]
+    pip install "netsuite[cli] @ git+https://github.com/vlouvet/netsuite.git"
 
 With `orjson` package (faster JSON handling):
 
-    pip install netsuite[orjson]
+    pip install "netsuite[orjson] @ git+https://github.com/vlouvet/netsuite.git"
 
 With all features:
 
-    pip install netsuite[all]
+    pip install "netsuite[all] @ git+https://github.com/vlouvet/netsuite.git"
 
 
 ## Programmatic use - Basic Example

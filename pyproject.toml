@@ -2,12 +2,15 @@
 name = "netsuite"
 version = "0.12.0"
 description = "Make async requests to NetSuite SuiteTalk SOAP/REST Web Services and Restlets"
-authors = ["Jacob Magnusson <m@jacobian.se>", "Mike Bianco <mike@mikebian.co>"]
+authors = [
+    "Jacob Magnusson <m@jacobian.se>",
+    "Mike Bianco <mike@mikebian.co>",
+    "Vicente Louvet III <louvetvicente@gmail.com>",
+]
 license = "MIT"
 readme = "README.md"
-homepage = "https://jacobsvante.github.io/netsuite/"
-repository = "https://github.com/jacobsvante/netsuite"
-documentation = "https://jacobsvante.github.io/netsuite/"
+homepage = "https://github.com/vlouvet/netsuite"
+repository = "https://github.com/vlouvet/netsuite"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Web Environment",
