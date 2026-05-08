@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -79,3 +80,54 @@ async def test_suiteql_paginated_stops_when_no_next_link(dummy_config):
     )
     pages = [page async for page in rest_api.suiteql_paginated(q="SELECT 1")]
     assert len(pages) == 1
+
+
+@pytest.mark.asyncio
+async def test_suiteql_warns_on_order_by_with_small_limit(dummy_config, caplog):
+    """Regression test for jacobsvante/netsuite#29: warn when an `ORDER BY`
+    SuiteQL query is combined with a limit that may trigger NetSuite's
+    zero-row quirk."""
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
+        await rest_api.suiteql(q="SELECT id FROM subsidiary ORDER BY id")
+    assert any("ORDER BY" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_suiteql_quiet_when_order_by_with_safe_limit(dummy_config, caplog):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
+        await rest_api.suiteql(
+            q="SELECT id FROM subsidiary ORDER BY id", limit=1000
+        )
+    assert not any("ORDER BY" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_suiteql_quiet_when_no_order_by(dummy_config, caplog):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
+        await rest_api.suiteql(q="SELECT id FROM subsidiary")
+    assert not any("ORDER BY" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_suiteql_order_by_detection_is_case_insensitive(dummy_config, caplog):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
+        await rest_api.suiteql(q="select id from subsidiary order by id")
+    assert any("ORDER BY" in r.message for r in caplog.records)
+
+
+@pytest.mark.asyncio
+async def test_suiteql_order_by_detection_ignores_substrings(dummy_config, caplog):
+    """`order_by_id` as a column name shouldn't trigger the warning."""
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
+    with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
+        await rest_api.suiteql(q="SELECT order_by_id FROM custom_table")
+    assert not any("ORDER BY" in r.message for r in caplog.records)

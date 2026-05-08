@@ -1,4 +1,5 @@
 import logging
+import re
 from functools import cached_property
 from typing import Any, AsyncIterator, Dict, Optional, Sequence
 
@@ -18,6 +19,17 @@ def _next_link(suiteql_response: Dict[str, Any]) -> Optional[str]:
         if link.get("rel") == "next":
             return link.get("href")
     return None
+
+
+# Matches an `ORDER BY` clause (case-insensitive). Word boundaries prevent
+# false positives on column names like `order_by_id`. The heuristic
+# deliberately fires on subquery ORDER BY's too, since those can also
+# surface the NetSuite empty-result quirk.
+_ORDER_BY_RE = re.compile(r"\border\s+by\b", re.IGNORECASE)
+
+# Below this threshold, `ORDER BY` is at risk of NetSuite's
+# zero-row quirk (jacobsvante/netsuite#29).
+_ORDER_BY_SAFE_LIMIT = 1000
 
 
 class NetSuiteRestApi(rest_api_base.RestApiBase):
@@ -70,8 +82,9 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
 
         Note on `ORDER BY`: NetSuite has a known quirk where a SuiteQL query
         with `ORDER BY` and a small `limit` (the default 10) can return zero
-        items. If you must order, ask for a larger page (`limit=1000`) or
-        order client-side after fetching. See jacobsvante/netsuite#29.
+        items. If you hit this, request a larger page (`limit=1000`) or sort
+        client-side after fetching. This method also logs a warning when it
+        detects the pattern. See jacobsvante/netsuite#29.
 
         Note on pagination: NetSuite caps `limit` at 1000. To stream every
         page until exhaustion, use `suiteql_paginated` instead.
@@ -80,6 +93,15 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
 
         - https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_156257799794.html#Using-SuiteQL
         """
+        if _ORDER_BY_RE.search(q) and limit < _ORDER_BY_SAFE_LIMIT:
+            logger.warning(
+                "SuiteQL query contains `ORDER BY` with limit=%d. NetSuite "
+                "has a known quirk where this combination can return zero "
+                "rows. Consider raising limit to %d or sorting client-side. "
+                "See jacobsvante/netsuite#29.",
+                limit,
+                _ORDER_BY_SAFE_LIMIT,
+            )
         return await self._request(
             "POST",
             "/query/v1/suiteql",
