@@ -25,7 +25,7 @@ SOAP_DEPRECATION_MESSAGE = (
 
 
 class NetSuiteSoapApi:
-    version = getattr(Config, "wsdl_version", "2021.1.0")
+    version = getattr(Config, "wsdl_version", "2024.2.0")
     wsdl_url_tmpl = "https://{account_slug}.suitetalk.api.netsuite.com/wsdl/v{underscored_version}/netsuite.wsdl"
 
     def __init__(

@@ -27,7 +27,7 @@ def test_netsuite_wsdl_url(dummy_config):
     soap_api = NetSuiteSoapApi(dummy_config)
     assert (
         soap_api.wsdl_url
-        == "https://123456-sb1.suitetalk.api.netsuite.com/wsdl/v2021_1_0/netsuite.wsdl"
+        == "https://123456-sb1.suitetalk.api.netsuite.com/wsdl/v2024_2_0/netsuite.wsdl"
     )
 
 
@@ -35,7 +35,7 @@ def test_netsuite_wsdl_url_production_account(dummy_config_with_production_accou
     soap_api = NetSuiteSoapApi(dummy_config_with_production_account)
     assert (
         soap_api.wsdl_url
-        == "https://123456.suitetalk.api.netsuite.com/wsdl/v2021_1_0/netsuite.wsdl"
+        == "https://123456.suitetalk.api.netsuite.com/wsdl/v2024_2_0/netsuite.wsdl"
     )
 
 
