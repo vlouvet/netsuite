@@ -32,13 +32,18 @@ class TokenAuth(BaseModel):
 
 class UsernamePasswordAuth(BaseModel):
     """
-    This is a very old authentication method that is not recommended for use.
+    Username/password auth. Not recommended for SOAP/REST — those should
+    use `TokenAuth` (legacy OAuth 1.0a TBA) or
+    `OAuth2ClientCredentialsAuth`. This class is the only way to
+    authenticate to NetSuite's SuiteAnalytics Connect ODBC service.
 
-    However, it's the only way to access the netsuite.com (NOT netsuite2.com) data source via ODBC.
+    `role` is the NetSuite role's internal ID (or name) to assume on the
+    connection — required for ODBC, ignored elsewhere.
     """
 
     username: str
     password: str
+    role: t.Optional[t.Union[str, int]] = None
 
 
 class OAuth2ClientCredentialsAuth(BaseModel):
@@ -85,12 +90,21 @@ class Config(BaseModel):
 
     log_level: t.Optional[str] = None
 
-    # TODO ODBC is not yet fully supported, but this is the first step
+    # SuiteAnalytics Connect ODBC settings. `odbc_data_source` selects which
+    # NetSuite ODBC backend to talk to ("NetSuite2.com" is the modern
+    # SuiteAnalytics Connect; "NetSuite.com" is the legacy data source).
+    # `odbc_driver` is the platform-specific driver name registered with
+    # the local ODBC driver manager — overridable per OS.
     odbc_data_source: t.Literal["NetSuite.com", "NetSuite2.com"] = "NetSuite.com"
+    odbc_driver: str = "{NetSuite Drivers 64bit}"
 
     @property
     def is_token_auth(self) -> bool:
         return isinstance(self.auth, TokenAuth)
+
+    @property
+    def is_password_auth(self) -> bool:
+        return isinstance(self.auth, UsernamePasswordAuth)
 
     @property
     def is_oauth2_auth(self) -> bool:
@@ -141,6 +155,11 @@ class Config(BaseModel):
         - `NETSUITE_TOKEN_SECRET`: The token secret for OAuth.
         - `NETSUITE_USERNAME`: The username for login auth (only for odbc).
         - `NETSUITE_PASSWORD`: The password for login auth (only for odbc).
+        - `NETSUITE_ROLE`: The NetSuite role for ODBC connections.
+        - `NETSUITE_ODBC_DRIVER`: ODBC driver name registered with the local
+          ODBC driver manager (defaults to `{NetSuite Drivers 64bit}`).
+        - `NETSUITE_ODBC_DATA_SOURCE`: NetSuite ODBC data source
+          (`NetSuite.com` or `NetSuite2.com`).
         - `NETSUITE_LOG_LEVEL`: log level for NetSuite debugging
 
         Returns a dictionary of available config options.
@@ -155,6 +174,9 @@ class Config(BaseModel):
             "token_secret",
             "username",
             "password",
+            "role",
+            "odbc_driver",
+            "odbc_data_source",
             "log_level",
         ]
         prefix = "NETSUITE_"
