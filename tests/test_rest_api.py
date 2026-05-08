@@ -1,6 +1,7 @@
 import logging
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
+import httpx
 import pytest
 
 from netsuite import NetSuiteRestApi
@@ -9,6 +10,75 @@ from netsuite import NetSuiteRestApi
 def test_expected_hostname(dummy_config):
     rest_api = NetSuiteRestApi(dummy_config)
     assert rest_api.hostname == "123456-sb1.suitetalk.api.netsuite.com"
+
+
+def _location_response(location: str) -> Mock:
+    """Mock a NetSuite POST-create response: HTTP 204 with a Location header."""
+    resp = Mock(spec=httpx.Response)
+    resp.status_code = 204
+    resp.headers = {"location": location}
+    resp.text = ""
+    return resp
+
+
+@pytest.mark.asyncio
+async def test_post_returns_numeric_record_id_from_location_header(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_location_response(
+            "https://123456-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/customer/647"
+        )
+    )
+    result = await rest_api.post("/record/v1/customer", json={"entityid": "Acme"})
+    assert result == 647
+    assert isinstance(result, int)
+
+
+@pytest.mark.asyncio
+async def test_post_returns_string_external_id_from_location_header(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_location_response(
+            "https://123456-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/customer/eid:CUST001"
+        )
+    )
+    result = await rest_api.post("/record/v1/customer", json={"entityid": "Acme"})
+    assert result == "eid:CUST001"
+    assert isinstance(result, str)
+
+
+@pytest.mark.asyncio
+async def test_post_returns_none_when_no_location_header(dummy_config):
+    """Some POST endpoints (e.g. SuiteQL) return 204 without a Location.
+    Those should still return None — the new behavior only kicks in for
+    record creates."""
+    rest_api = NetSuiteRestApi(dummy_config)
+    resp = Mock(spec=httpx.Response)
+    resp.status_code = 204
+    resp.headers = {}
+    resp.text = ""
+    rest_api._request_impl = AsyncMock(return_value=resp)  # type: ignore[method-assign]
+    assert await rest_api.post("/record/v1/customer", json={}) is None
+
+
+@pytest.mark.asyncio
+async def test_create_record_helper_posts_to_record_endpoint(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_location_response(
+            "https://123456-sb1.suitetalk.api.netsuite.com/services/rest/record/v1/customer/123"
+        )
+    )
+    result = await rest_api.create_record(
+        "customer",
+        {"entityid": "Acme", "subsidiary": {"id": "1"}},
+    )
+    assert result == 123
+    # Verify it routed through POST /record/v1/customer.
+    rest_api._request_impl.assert_awaited_once()
+    args, kwargs = rest_api._request_impl.await_args
+    assert args == ("POST", "/record/v1/customer")
+    assert kwargs["json"] == {"entityid": "Acme", "subsidiary": {"id": "1"}}
 
 
 @pytest.mark.asyncio

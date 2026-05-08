@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import logging
+import re
 import time
 from functools import cached_property
 
@@ -57,6 +58,20 @@ class RestApiBase:
             raise NetsuiteAPIRequestError(resp.status_code, resp.text)
 
         if resp.status_code == 204:
+            # NetSuite responds 204 with a `Location` header on successful
+            # POST creates; the URL ends with the new record's ID. Surface
+            # it to callers so they don't have to crack the header
+            # themselves. Numeric IDs come back as `int`; external IDs
+            # (e.g. `eid:CUST001`) come back as `str`.
+            if method.upper() == "POST" and "location" in resp.headers:
+                location = resp.headers["location"]
+                match = re.search(r"/([^/]+)$", location)
+                if match:
+                    record_id = match.group(1)
+                    try:
+                        return int(record_id)
+                    except ValueError:
+                        return record_id
             return None
         else:
             try:

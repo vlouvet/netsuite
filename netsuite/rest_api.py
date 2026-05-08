@@ -1,7 +1,7 @@
 import logging
 import re
 from functools import cached_property
-from typing import Any, AsyncIterator, Dict, Optional, Sequence
+from typing import Any, AsyncIterator, Dict, Optional, Sequence, Union
 
 from . import rest_api_base
 from .config import Config
@@ -71,6 +71,33 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
 
     async def delete(self, subpath: str, **request_kw):
         return await self._request("DELETE", subpath, **request_kw)
+
+    async def create_record(
+        self,
+        record_type: str,
+        record_data: Dict[str, Any],
+        **request_kw,
+    ) -> Union[int, str]:
+        """Create a new record and return its ID.
+
+        NetSuite's REST API responds to a successful POST create with HTTP
+        204 plus a `Location` header pointing at the new record. This
+        helper POSTs to ``/record/v1/{record_type}`` and returns the ID
+        from that header (numeric IDs as ``int``, external IDs like
+        ``eid:CUST001`` as ``str``).
+
+        Example:
+            >>> customer_id = await rest_api.create_record(
+            ...     "customer",
+            ...     {"entityid": "Acme", "subsidiary": {"id": "1"}},
+            ... )
+
+        Documentation:
+            https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1545141395.html
+        """
+        return await self.post(
+            f"/record/v1/{record_type}", json=record_data, **request_kw
+        )
 
     # TODO maybe break out params vs poping?
     async def suiteql(self, q: str, limit: int = 10, offset: int = 0, **request_kw):
