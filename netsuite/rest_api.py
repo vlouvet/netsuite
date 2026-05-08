@@ -1,6 +1,6 @@
 import logging
 from functools import cached_property
-from typing import Sequence
+from typing import Any, AsyncIterator, Dict, Optional, Sequence
 
 from . import rest_api_base
 from .config import Config
@@ -8,6 +8,16 @@ from .config import Config
 logger = logging.getLogger(__name__)
 
 __all__ = ("NetSuiteRestApi",)
+
+
+def _next_link(suiteql_response: Dict[str, Any]) -> Optional[str]:
+    """Return the absolute URL of the `next` link from a SuiteQL response, or None."""
+    if not suiteql_response.get("hasMore"):
+        return None
+    for link in suiteql_response.get("links") or ():
+        if link.get("rel") == "next":
+            return link.get("href")
+    return None
 
 
 class NetSuiteRestApi(rest_api_base.RestApiBase):
@@ -53,8 +63,18 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
     # TODO maybe break out params vs poping?
     async def suiteql(self, q: str, limit: int = 10, offset: int = 0, **request_kw):
         """
+        Run a single SuiteQL query.
+
         Example:
         >>> suiteql(q="SELECT * FROM Transaction", limit=10, offset=0)
+
+        Note on `ORDER BY`: NetSuite has a known quirk where a SuiteQL query
+        with `ORDER BY` and a small `limit` (the default 10) can return zero
+        items. If you must order, ask for a larger page (`limit=1000`) or
+        order client-side after fetching. See jacobsvante/netsuite#29.
+
+        Note on pagination: NetSuite caps `limit` at 1000. To stream every
+        page until exhaustion, use `suiteql_paginated` instead.
 
         Documentation:
 
@@ -69,6 +89,63 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
             params={"limit": limit, "offset": offset, **request_kw.pop("params", {})},
             **request_kw,
         )
+
+    async def suiteql_paginated(
+        self,
+        q: str,
+        *,
+        limit: int = 1000,
+        offset: int = 0,
+        **request_kw,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """
+        Async generator yielding each page of a SuiteQL query, following the
+        `next` link in NetSuite's response until `hasMore` is False.
+
+        Yields the raw page dict (with `items`, `count`, `hasMore`, `links`,
+        etc.). Use `limit=1000` (the NetSuite max) to minimize round trips.
+
+        Example:
+        >>> async for page in rest_api.suiteql_paginated(q="SELECT id FROM transaction"):
+        ...     for row in page["items"]:
+        ...         ...
+
+        Caveat: a single SuiteQL query can return at most 100,000 rows in
+        total — that is a NetSuite-side cap, not a library limitation. To
+        retrieve more, partition the query with a WHERE clause (e.g. on
+        `id` ranges or date windows) and run several paginated queries.
+        See jacobsvante/netsuite#42.
+        """
+        # First page goes through the normal `suiteql` path so users get
+        # consistent header/param handling. Subsequent pages follow the
+        # absolute `next` link from each response.
+        page = await self.suiteql(q, limit=limit, offset=offset, **request_kw)
+        yield page
+
+        next_url = _next_link(page)
+        # Subsequent pages reuse the same body; only the URL (with offset)
+        # changes. We forward `**request_kw` so callers' headers/params
+        # still apply.
+        body_kw = {
+            "headers": {"Prefer": "transient", **request_kw.pop("headers", {})},
+            "json": {"q": q, **request_kw.pop("json", {})},
+        }
+        # `params` are encoded in the next URL, so we must not also pass
+        # them here — that would double-up offset/limit.
+        request_kw.pop("params", None)
+
+        while next_url is not None:
+            page = await self._request(
+                "POST",
+                # `subpath` is ignored when `url` is provided, but
+                # `_request_impl` still requires the parameter.
+                "/query/v1/suiteql",
+                url=next_url,
+                **body_kw,
+                **request_kw,
+            )
+            yield page
+            next_url = _next_link(page)
 
     async def jsonschema(self, record_type: str, **request_kw):
         headers = {
