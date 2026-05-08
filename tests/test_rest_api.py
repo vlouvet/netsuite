@@ -99,9 +99,7 @@ async def test_suiteql_quiet_when_order_by_with_safe_limit(dummy_config, caplog)
     rest_api = NetSuiteRestApi(dummy_config)
     rest_api._request = AsyncMock(return_value={"items": []})  # type: ignore[method-assign]
     with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
-        await rest_api.suiteql(
-            q="SELECT id FROM subsidiary ORDER BY id", limit=1000
-        )
+        await rest_api.suiteql(q="SELECT id FROM subsidiary ORDER BY id", limit=1000)
     assert not any("ORDER BY" in r.message for r in caplog.records)
 
 

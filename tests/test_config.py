@@ -7,7 +7,6 @@ import pytest
 
 from netsuite.config import Config, TokenAuth, UsernamePasswordAuth
 
-
 # ---------------------------------------------------------------------------
 # Properties
 # ---------------------------------------------------------------------------
@@ -37,7 +36,9 @@ def test_is_sandbox(account, expected, dummy_config):
 
 
 def test_account_number_strips_sandbox_suffix(dummy_config):
-    assert Config(account="123456_SB1", auth=dummy_config.auth).account_number == "123456"
+    assert (
+        Config(account="123456_SB1", auth=dummy_config.auth).account_number == "123456"
+    )
     assert Config(account="123456", auth=dummy_config.auth).account_number == "123456"
 
 
