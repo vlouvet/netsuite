@@ -15,10 +15,7 @@ def test_init_extracts_base_url_from_wsdl_url():
     transport = AsyncNetSuiteTransport(
         "https://123-sb1.suitetalk.api.netsuite.com/wsdl/v2021_1_0/netsuite.wsdl",
     )
-    assert (
-        transport._netsuite_base_url
-        == "https://123-sb1.suitetalk.api.netsuite.com"
-    )
+    assert transport._netsuite_base_url == "https://123-sb1.suitetalk.api.netsuite.com"
 
 
 def test_init_handles_url_without_path():
@@ -45,7 +42,10 @@ def test_fix_address_preserves_query_string():
     fixed = transport._fix_address(
         "https://webservices.netsuite.com/services/NetSuitePort_2021_1?wsdl"
     )
-    assert fixed == "https://acct.suitetalk.api.netsuite.com/services/NetSuitePort_2021_1?wsdl"
+    assert (
+        fixed
+        == "https://acct.suitetalk.api.netsuite.com/services/NetSuitePort_2021_1?wsdl"
+    )
 
 
 @pytest.mark.asyncio

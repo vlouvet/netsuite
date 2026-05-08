@@ -13,7 +13,6 @@ import pytest
 
 from netsuite import json as nsjson
 
-
 # ---------------------------------------------------------------------------
 # Round-trip: dumps→loads should preserve plain dict/list/scalar payloads
 # regardless of which JSON backend is in use.
@@ -55,7 +54,10 @@ class _Color(Enum):
         (frozenset([1, 2, 3]), [1, 2, 3]),
         (set([1, 2, 3]), [1, 2, 3]),
         (Path("/tmp/x"), "/tmp/x"),
-        (UUID("12345678-1234-5678-1234-567812345678"), "12345678-1234-5678-1234-567812345678"),
+        (
+            UUID("12345678-1234-5678-1234-567812345678"),
+            "12345678-1234-5678-1234-567812345678",
+        ),
     ],
 )
 def test_dumps_encodes_supported_types(value, expected_decoded):

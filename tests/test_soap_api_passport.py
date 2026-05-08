@@ -7,7 +7,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from netsuite.config import Config
-from netsuite.soap_api.passport import Passport, TokenPassport, make as make_passport
+from netsuite.soap_api.passport import Passport, TokenPassport
+from netsuite.soap_api.passport import make as make_passport
 from netsuite.soap_api.zeep import ZEEP_INSTALLED
 
 pytestmark = pytest.mark.skipif(not ZEEP_INSTALLED, reason="Requires zeep")
@@ -69,8 +70,7 @@ def test_signature_key_combines_secrets(dummy_config):
     passport = _make_passport(dummy_config)
     key = passport._get_signature_key()
     assert (
-        key
-        == f"{dummy_config.auth.consumer_secret}&{dummy_config.auth.token_secret}"
+        key == f"{dummy_config.auth.consumer_secret}&{dummy_config.auth.token_secret}"
     )
 
 

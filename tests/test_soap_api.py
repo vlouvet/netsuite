@@ -5,7 +5,8 @@ import pytest
 
 from netsuite import NetSuiteSoapApi
 from netsuite.config import Config, TokenAuth
-from netsuite.soap_api.passport import TokenPassport, make as make_passport
+from netsuite.soap_api.passport import TokenPassport
+from netsuite.soap_api.passport import make as make_passport
 from netsuite.soap_api.transports import AsyncNetSuiteTransport
 from netsuite.soap_api.zeep import ZEEP_INSTALLED
 
@@ -77,7 +78,9 @@ def test_transport_fixes_address_to_account_subdomain():
         "https://123456-sb1.suitetalk.api.netsuite.com/wsdl/v2021_1_0/netsuite.wsdl",
     )
     assert (
-        transport._fix_address("https://webservices.netsuite.com/services/NetSuitePort_2021_1")
+        transport._fix_address(
+            "https://webservices.netsuite.com/services/NetSuitePort_2021_1"
+        )
         == "https://123456-sb1.suitetalk.api.netsuite.com/services/NetSuitePort_2021_1"
     )
 
@@ -230,9 +233,7 @@ async def test_getList_short_circuits_on_no_ids(dummy_config):
 async def test_getList_builds_record_refs_for_each_id(dummy_config):
     soap_api = _build_soap_api_with_mocks(dummy_config)
     soap_api.request = AsyncMock(return_value=None)  # type: ignore[method-assign]
-    await soap_api.getList(
-        "customer", internalIds=[1, 2], externalIds=["e1"]
-    )
+    await soap_api.getList("customer", internalIds=[1, 2], externalIds=["e1"])
     # 2 internal + 1 external = 3 RecordRef constructions
     assert soap_api.Core.RecordRef.call_count == 3
     soap_api.Messages.GetListRequest.assert_called_once()
@@ -318,10 +319,10 @@ async def test_request_attaches_passport_and_extra_headers(dummy_config):
     fake_method = AsyncMock(return_value="result")
     fake_service.someOp = fake_method
     with patch.object(
-        type(soap_api), "service", new_callable=lambda: property(lambda self: fake_service)
-    ), patch.object(
-        soap_api, "generate_passport", return_value={"tokenPassport": "P"}
-    ):
+        type(soap_api),
+        "service",
+        new_callable=lambda: property(lambda self: fake_service),
+    ), patch.object(soap_api, "generate_passport", return_value={"tokenPassport": "P"}):
         result = await soap_api.request(
             "someOp",
             "arg",
@@ -375,6 +376,8 @@ def test_with_timeout_uses_transport_settings(dummy_config):
 
 
 def test_missing_zeep_raises_runtime_error(dummy_config):
-    with patch.object(NetSuiteSoapApi, "_has_required_dependencies", return_value=False):
+    with patch.object(
+        NetSuiteSoapApi, "_has_required_dependencies", return_value=False
+    ):
         with pytest.raises(RuntimeError, match="soap_api"):
             NetSuiteSoapApi(dummy_config)

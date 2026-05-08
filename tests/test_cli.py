@@ -14,9 +14,9 @@ pytest.importorskip("pkg_resources")
 import importlib  # noqa: E402
 
 cli_main_module = importlib.import_module("netsuite.cli.main")
-from netsuite.cli import helpers, misc, restlet, soap_api  # noqa: E402
+from netsuite.cli import helpers, misc  # noqa: E402
 from netsuite.cli import rest_api as cli_rest_api  # noqa: E402
-
+from netsuite.cli import restlet, soap_api  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # helpers.load_config_or_error

@@ -34,7 +34,10 @@ class _ConcreteApi(RestApiBase):
 def _httpx_response(status_code, text, headers=None):
     request = httpx.Request("GET", "https://example.com/x")
     return httpx.Response(
-        status_code, content=text.encode("utf-8"), headers=headers or {}, request=request
+        status_code,
+        content=text.encode("utf-8"),
+        headers=headers or {},
+        request=request,
     )
 
 
@@ -46,9 +49,7 @@ def _httpx_response(status_code, text, headers=None):
 @pytest.mark.asyncio
 async def test_request_returns_decoded_json_on_2xx(dummy_config):
     api = _ConcreteApi(dummy_config)
-    api._request_impl = AsyncMock(
-        return_value=_httpx_response(200, '{"ok": true}')
-    )
+    api._request_impl = AsyncMock(return_value=_httpx_response(200, '{"ok": true}'))
     assert await api._request("GET", "/x") == {"ok": True}
 
 
@@ -63,9 +64,7 @@ async def test_request_returns_none_on_204(dummy_config):
 @pytest.mark.parametrize("status_code", [400, 401, 403, 404, 500, 503])
 async def test_request_raises_on_non_2xx(dummy_config, status_code):
     api = _ConcreteApi(dummy_config)
-    api._request_impl = AsyncMock(
-        return_value=_httpx_response(status_code, "boom")
-    )
+    api._request_impl = AsyncMock(return_value=_httpx_response(status_code, "boom"))
     with pytest.raises(NetsuiteAPIRequestError) as excinfo:
         await api._request("GET", "/x")
     assert excinfo.value.status_code == status_code
@@ -167,7 +166,10 @@ async def test_request_impl_serializes_json_to_data(dummy_config):
         await api._request_impl("POST", "/x", json={"q": "SELECT 1"})
 
     assert "json" not in captured
-    assert captured["data"] == '{"q": "SELECT 1"}' or captured["data"] == '{"q":"SELECT 1"}'
+    assert (
+        captured["data"] == '{"q": "SELECT 1"}'
+        or captured["data"] == '{"q":"SELECT 1"}'
+    )
 
 
 @pytest.mark.asyncio
