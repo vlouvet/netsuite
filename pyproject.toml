@@ -74,3 +74,10 @@ multi_line_output = 3
 [tool.pytest.ini_options]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
 asyncio_mode = "strict"
+# The SOAP DeprecationWarning is intentional and tested explicitly in
+# test_soap_api_deprecation. Silence it in every other test path so the
+# pytest summary stays useful for surfacing real warnings.
+filterwarnings = [
+    "default",
+    "ignore:NetSuite has announced that SOAP Web Services:DeprecationWarning",
+]

@@ -1,5 +1,7 @@
 import asyncio
+import functools
 import logging
+import time
 from functools import cached_property
 
 import httpx
@@ -9,7 +11,17 @@ from authlib.oauth1.rfc5849.signature import generate_signature_base_string
 from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha256
 
 from . import json
+from .config import (
+    OAuth2AccessTokenAuth,
+    OAuth2ClientCredentialsAuth,
+    TokenAuth,
+)
 from .exceptions import NetsuiteAPIRequestError, NetsuiteAPIResponseParsingError
+from .oauth2 import (
+    OAuth2BearerAuth,
+    OAuth2Token,
+    exchange_client_assertion,
+)
 
 __all__ = ("RestApiBase",)
 
@@ -91,14 +103,56 @@ class RestApiBase:
 
     def _make_auth(self):
         auth = self._config.auth
-        return OAuth1Auth(
-            client_id=auth.consumer_key,
-            client_secret=auth.consumer_secret,
-            token=auth.token_id,
-            token_secret=auth.token_secret,
-            realm=self._config.account,
-            force_include_body=True,
-            signature_method=self._signature_method,
+        if isinstance(auth, TokenAuth):
+            return OAuth1Auth(
+                client_id=auth.consumer_key,
+                client_secret=auth.consumer_secret,
+                token=auth.token_id,
+                token_secret=auth.token_secret,
+                realm=self._config.account,
+                force_include_body=True,
+                signature_method=self._signature_method,
+            )
+        if isinstance(auth, OAuth2ClientCredentialsAuth):
+            # The auth handler caches the token across calls; we lazily
+            # bind a `token_factory` that knows how to mint a fresh one.
+            token_factory = functools.partial(
+                exchange_client_assertion,
+                self._config.account,
+                client_id=auth.client_id,
+                certificate_id=auth.certificate_id,
+                private_key_pem=auth.private_key_pem,
+                scope=auth.scope,
+                algorithm=auth.algorithm,
+            )
+            cached = getattr(self, "_oauth2_handler", None)
+            if cached is None:
+                cached = OAuth2BearerAuth(token_factory)
+                # Cache on the instance so token re-use works across
+                # back-to-back requests.
+                self._oauth2_handler = cached  # type: ignore[attr-defined]
+            return cached
+        if isinstance(auth, OAuth2AccessTokenAuth):
+            # Bring-your-own token. We don't refresh; the user wired
+            # that in upstream. We still wrap it in OAuth2BearerAuth so
+            # the Authorization header is set consistently.
+            initial = OAuth2Token(
+                access_token=auth.access_token,
+                expires_at=auth.expires_at or (time.time() + 3600),
+                refresh_token=auth.refresh_token,
+            )
+
+            async def _no_refresh() -> OAuth2Token:
+                raise RuntimeError(
+                    "OAuth2AccessTokenAuth does not refresh automatically. "
+                    "Provide a fresh token via your own auth flow."
+                )
+
+            return OAuth2BearerAuth(_no_refresh, initial_token=initial)
+        raise TypeError(
+            f"Unsupported auth type for HTTP requests: {type(auth).__name__}. "
+            f"Use TokenAuth, OAuth2ClientCredentialsAuth, or "
+            f"OAuth2AccessTokenAuth."
         )
 
     def _make_default_headers(self):
