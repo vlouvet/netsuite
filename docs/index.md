@@ -122,6 +122,27 @@ async def async_main() -> dict:
         asyncio.run(async_main())
 ```
 
+## Programmatic use - SuiteQL pagination
+
+NetSuite caps a single SuiteQL response at `limit=1000` rows, and a single query overall at 100,000 rows. To stream every page of a result set without manually wiring up the `next` link, use `suiteql_paginated`:
+
+```python
+async def fetch_all_transactions():
+    rows = []
+    async for page in ns.rest_api.suiteql_paginated(
+        q="SELECT id, tranid FROM transaction",
+        limit=1000,
+    ):
+        rows.extend(page["items"])
+    return rows
+```
+
+Each yielded `page` is the raw NetSuite response dict (with `items`, `count`, `hasMore`, `links`, …). Iteration stops automatically when `hasMore` is False.
+
+To retrieve more than 100,000 rows from a query, partition by a WHERE clause and run multiple paginated queries — for example by `id` ranges or date windows.
+
+> **`ORDER BY` caveat.** NetSuite has a known quirk where a SuiteQL query with `ORDER BY` and a small `limit` (the default 10) can return zero items. Either request a larger page (`limit=1000`) or sort client-side after fetching. See [#29](https://github.com/jacobsvante/netsuite/issues/29).
+
 ## Programmatic use - Download Large Files Using SOAP API
 When working with large files, you might find that responses are truncated if they exceed 10MB. This limitation stems from the default settings in Zeep. To overcome this, enable the `xml_huge_tree` option in the Zeep client settings.
 
