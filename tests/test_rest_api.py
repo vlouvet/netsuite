@@ -2,6 +2,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from netsuite import NetSuiteRestApi
@@ -276,3 +277,96 @@ async def test_batch_raises_on_error_status(dummy_config):
     rest_api._request_impl = AsyncMock(return_value=fake_resp)  # type: ignore[method-assign]
     with pytest.raises(NetsuiteAPIRequestError):
         await rest_api.batch("salesOrder", [{"name": "x"}], method="PATCH")
+
+
+# ---------------------------------------------------------------------------
+# create_record — POST a record and return the new ID from the Location header
+# ---------------------------------------------------------------------------
+
+
+def _created_response(location, *, status_code=204):
+    # NetSuite answers a create with 204 No Content and a Location header
+    # pointing at the new record. httpx.Headers is case-insensitive, which
+    # is what the real response uses.
+    return SimpleNamespace(
+        status_code=status_code,
+        text="",
+        headers=httpx.Headers({"Location": location} if location else {}),
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_record_posts_data_to_collection_endpoint(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    loc = "https://x.suitetalk.api.netsuite.com/services/rest/record/v1/customer/647"
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_created_response(loc)
+    )
+    data = {"companyName": "Acme", "subsidiary": {"id": "1"}}
+    await rest_api.create_record("customer", data)
+    args, kwargs = rest_api._request_impl.await_args
+    assert args == ("POST", "/record/v1/customer")
+    assert kwargs["json"] == data
+
+
+@pytest.mark.asyncio
+async def test_create_record_returns_int_for_numeric_id(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    loc = "https://x.suitetalk.api.netsuite.com/services/rest/record/v1/customer/647"
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_created_response(loc)
+    )
+    result = await rest_api.create_record("customer", {})
+    assert result == 647
+    assert isinstance(result, int)
+
+
+@pytest.mark.asyncio
+async def test_create_record_returns_str_for_external_id(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    loc = (
+        "https://x.suitetalk.api.netsuite.com/services/rest/record/v1/"
+        "customer/eid:ACME_42"
+    )
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_created_response(loc)
+    )
+    result = await rest_api.create_record("customer", {})
+    assert result == "eid:ACME_42"
+
+
+@pytest.mark.asyncio
+async def test_create_record_ignores_query_and_trailing_slash(dummy_config):
+    """Regression vs the original `/([^/]+)$` regex, which would return the
+    querystring or an empty segment. The ID is the last real path segment."""
+    rest_api = NetSuiteRestApi(dummy_config)
+    loc = (
+        "https://x.suitetalk.api.netsuite.com/services/rest/record/v1/"
+        "salesOrder/980/?expandSubResources=true"
+    )
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_created_response(loc)
+    )
+    result = await rest_api.create_record("salesOrder", {})
+    assert result == 980
+
+
+@pytest.mark.asyncio
+async def test_create_record_returns_none_without_location_header(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=_created_response(None)
+    )
+    result = await rest_api.create_record("customer", {})
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_create_record_raises_on_error_status(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    fake_resp = SimpleNamespace(status_code=400, text="bad", headers=httpx.Headers())
+    rest_api._request_impl = AsyncMock(  # type: ignore[method-assign]
+        return_value=fake_resp
+    )
+    with pytest.raises(NetsuiteAPIRequestError):
+        await rest_api.create_record("customer", {"bad": "data"})
