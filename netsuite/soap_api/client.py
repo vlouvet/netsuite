@@ -17,10 +17,13 @@ __all__ = ("NetSuiteSoapApi",)
 
 
 SOAP_DEPRECATION_MESSAGE = (
-    "NetSuite has announced that SOAP Web Services will be removed in the "
-    "2027.1 release. New integrations should use the REST API with OAuth 2.0 "
-    "(see `netsuite.OAuth2ClientCredentialsAuth`); existing SOAP integrations "
-    "should plan a migration before 2027.1."
+    "NetSuite has announced that SOAP Web Services are being gradually "
+    "removed. The 2025.2 endpoint is the last planned SOAP endpoint, and "
+    "older endpoints lose support over the following releases. New "
+    "integrations should use the REST API with OAuth 2.0 (see "
+    "`netsuite.OAuth2ClientCredentialsAuth`); existing SOAP integrations "
+    "should plan a migration. See NetSuite's SOAP Removal Plans FAQ for the "
+    "endpoint support timeline."
 )
 
 
