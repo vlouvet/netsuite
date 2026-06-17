@@ -53,7 +53,9 @@ class _Color(Enum):
         (_Color.RED, "red"),
         (frozenset([1, 2, 3]), [1, 2, 3]),
         (set([1, 2, 3]), [1, 2, 3]),
-        (Path("/tmp/x"), "/tmp/x"),
+        # Encoder serializes Path via str(); expected must match per-OS
+        # (POSIX "/tmp/x" vs Windows "\\tmp\\x") rather than hardcode POSIX.
+        (Path("/tmp/x"), str(Path("/tmp/x"))),
         (
             UUID("12345678-1234-5678-1234-567812345678"),
             "12345678-1234-5678-1234-567812345678",
