@@ -1,14 +1,26 @@
 import logging
 import re
 from functools import cached_property
-from typing import Any, AsyncIterator, Dict, Optional, Sequence
+from typing import Any, AsyncIterator, Dict, Optional, Sequence, Union
 
-from . import rest_api_base
+from . import json, rest_api_base
 from .config import Config
+from .exceptions import NetsuiteAPIRequestError
 
 logger = logging.getLogger(__name__)
 
 __all__ = ("NetSuiteRestApi",)
+
+# Custom media types introduced for the 2026.1 REST web services
+# operations. Batch uses a `collection` content type; create-form and
+# selectOptions select their behaviour through the `Accept` header.
+_COLLECTION_MEDIA_TYPE = "application/vnd.oracle.resource+json; type=collection"
+_CREATE_FORM_MEDIA_TYPE = "application/vnd.oracle.resource+json; type=create-form"
+_SELECT_OPTIONS_MEDIA_TYPE = "application/vnd.oracle.resource+json; type=select-options"
+
+# Batch add/update/upsert verbs (GET/DELETE batches go through the normal
+# get()/delete() with an `ids` param instead).
+_BATCH_METHODS = ("POST", "PATCH", "PUT")
 
 
 def _next_link(suiteql_response: Dict[str, Any]) -> Optional[str]:
@@ -231,6 +243,211 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
             params=params,
             **request_kw,
         )
+
+    async def attach(
+        self,
+        record_type: str,
+        record_id: str,
+        target_type: str,
+        target_id: str,
+        *,
+        role: Optional[Dict[str, Any]] = None,
+        **request_kw,
+    ):
+        """
+        Attach one record instance to another, defining a relationship
+        between them (new in NetSuite 2026.1 REST web services).
+
+        `record_type`/`record_id` identify the record being attached *to*;
+        `target_type`/`target_id` identify the record being attached. Both
+        IDs may be internal IDs or external IDs in `eid:VALUE` form.
+
+        NetSuite currently supports attaching contact and file records only.
+        When attaching a contact you may pass `role` (e.g. `{"id": "-10"}`
+        or `{"externalId": "family"}`); otherwise the request body is empty.
+
+        Returns `None` (NetSuite responds with HTTP 204 No Content).
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/article_0113084334.html
+        """
+        json_body = request_kw.pop("json", {})
+        if role is not None:
+            json_body = {"role": role, **json_body}
+        return await self._request(
+            "POST",
+            f"/record/v1/{record_type}/{record_id}/!attach/{target_type}/{target_id}",
+            json=json_body,
+            **request_kw,
+        )
+
+    async def detach(
+        self,
+        record_type: str,
+        record_id: str,
+        target_type: str,
+        target_id: str,
+        **request_kw,
+    ):
+        """
+        Remove the relationship between two record instances (the inverse of
+        `attach`). IDs may be internal IDs or `eid:VALUE` external IDs.
+
+        Returns `None` (HTTP 204 No Content).
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/article_0113084334.html
+        """
+        return await self._request(
+            "POST",
+            f"/record/v1/{record_type}/{record_id}/!detach/{target_type}/{target_id}",
+            **request_kw,
+        )
+
+    async def create_form(
+        self,
+        record_type: str,
+        record_id: str,
+        target_type: str,
+        *,
+        body: Optional[Dict[str, Any]] = None,
+        **request_kw,
+    ):
+        """
+        Run the create-form (transform) operation: load a target record with
+        its fields prepopulated from a related source record, without
+        submitting it (new in NetSuite 2026.1 REST web services).
+
+        For example, transform a sales order into an item fulfillment to see
+        every default field and default line ID before you POST the new
+        record. Pass field overrides in `body`; the operation supports the
+        `expand`, `expandSubResources` and `fields` query params via
+        `params`.
+
+        Returns the prepopulated record as a dict.
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/article_1217103046.html
+        """
+        headers = {
+            "Accept": _CREATE_FORM_MEDIA_TYPE,
+            **request_kw.pop("headers", {}),
+        }
+        return await self._request(
+            "POST",
+            f"/record/v1/{record_type}/{record_id}/!transform/{target_type}",
+            headers=headers,
+            json=body if body is not None else {},
+            **request_kw,
+        )
+
+    async def select_options(
+        self,
+        record_type: str,
+        fields: Union[str, Sequence[str]],
+        *,
+        record_id: Optional[str] = None,
+        body: Optional[Dict[str, Any]] = None,
+        **request_kw,
+    ):
+        """
+        Retrieve the valid select options for one or more fields on a record
+        (new in NetSuite 2026.1 REST web services).
+
+        Pass a single field name or a sequence of them in `fields` (sublist
+        fields use dotted names, e.g. `line.dueToFromSubsidiary`). Omit
+        `record_id` to get the options on a *new* record instance (issued as
+        a POST); pass `record_id` to query an *existing* instance (issued as
+        a PATCH). When the options depend on other field values, supply those
+        in `body` (e.g. `{"subsidiary": {"id": 1}}`).
+
+        Returns the response dict, with a `_selectOptions` block per requested
+        field (each itself paginated: `items`/`count`/`hasMore`/
+        `totalResults`).
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/article_0115100241.html
+        """
+        if isinstance(fields, str):
+            fields = [fields]
+        headers = {
+            "Accept": _SELECT_OPTIONS_MEDIA_TYPE,
+            **request_kw.pop("headers", {}),
+        }
+        params = {"fields": ",".join(fields), **request_kw.pop("params", {})}
+        if record_id is None:
+            method, subpath = "POST", f"/record/v1/{record_type}"
+        else:
+            method, subpath = "PATCH", f"/record/v1/{record_type}/{record_id}"
+        return await self._request(
+            method,
+            subpath,
+            headers=headers,
+            params=params,
+            json=body if body is not None else {},
+            **request_kw,
+        )
+
+    async def batch(
+        self,
+        record_type: str,
+        items: Sequence[Dict[str, Any]],
+        *,
+        method: str = "POST",
+        idempotency_key: Optional[str] = None,
+        **request_kw,
+    ):
+        """
+        Add, update, or upsert up to 100 instances of a single record type in
+        one asynchronous request (new in NetSuite 2026.1 REST web services).
+
+        `method` is POST (create), PUT (upsert), or PATCH (update). Each item
+        in `items` is a record body; PATCH/PUT items must carry an `id` or
+        `externalId`. Pass `idempotency_key` to set the
+        `X-NetSuite-idempotency-key` header.
+
+        NetSuite processes the batch asynchronously, so this returns a dict
+        with the HTTP `status_code`, the `location` URL of the async job
+        (poll it with `get()`), and any response `body`. Unlike the other
+        helpers it talks to the lower-level request layer directly, because
+        the async job URL is only exposed in the `Location` response header,
+        which the JSON helpers discard.
+
+        For batch reads or deletes, use `get()`/`delete()` on the collection
+        endpoint with an `ids` param instead.
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/article_0127092747.html
+        """
+        method = method.upper()
+        if method not in _BATCH_METHODS:
+            raise ValueError(
+                f"batch() method must be one of {_BATCH_METHODS}, got "
+                f"{method!r}. For batch reads/deletes use get()/delete() with "
+                "an `ids` param."
+            )
+        headers = {
+            "Prefer": "respond-async",
+            "Content-Type": _COLLECTION_MEDIA_TYPE,
+            **request_kw.pop("headers", {}),
+        }
+        if idempotency_key is not None:
+            headers.setdefault("X-NetSuite-idempotency-key", idempotency_key)
+        resp = await self._request_impl(
+            method,
+            f"/record/v1/{record_type}",
+            headers=headers,
+            json={"items": list(items), **request_kw.pop("json", {})},
+            **request_kw,
+        )
+        if resp.status_code < 200 or resp.status_code > 299:
+            raise NetsuiteAPIRequestError(resp.status_code, resp.text)
+        body = None
+        if resp.text:
+            try:
+                body = json.loads(resp.text)
+            except Exception:
+                body = None
+        return {
+            "status_code": resp.status_code,
+            "location": resp.headers.get("Location"),
+            "body": body,
+        }
 
     def _make_hostname(self):
         return f"{self._config.account_slugified}.suitetalk.api.netsuite.com"

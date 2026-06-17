@@ -1,9 +1,11 @@
 import logging
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from netsuite import NetSuiteRestApi
+from netsuite.exceptions import NetsuiteAPIRequestError
 
 
 def test_expected_hostname(dummy_config):
@@ -129,3 +131,148 @@ async def test_suiteql_order_by_detection_ignores_substrings(dummy_config, caplo
     with caplog.at_level(logging.WARNING, logger="netsuite.rest_api"):
         await rest_api.suiteql(q="SELECT order_by_id FROM custom_table")
     assert not any("ORDER BY" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# 2026.1 REST web services operations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_attach_posts_to_attach_endpoint_with_empty_body(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    result = await rest_api.attach("customer", "660", "contact", "106")
+    assert result is None
+    args, kwargs = rest_api._request.await_args
+    assert args == (
+        "POST",
+        "/record/v1/customer/660/!attach/contact/106",
+    )
+    # Body defaults to an empty object when no role is given.
+    assert kwargs["json"] == {}
+
+
+@pytest.mark.asyncio
+async def test_attach_includes_role_when_provided(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    await rest_api.attach("customer", "660", "contact", "106", role={"id": "-10"})
+    _, kwargs = rest_api._request.await_args
+    assert kwargs["json"] == {"role": {"id": "-10"}}
+
+
+@pytest.mark.asyncio
+async def test_attach_supports_external_ids(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    await rest_api.attach("customer", "eid:JOHN_DOE42", "contact", "eid:user1")
+    args, _ = rest_api._request.await_args
+    assert args[1] == ("/record/v1/customer/eid:JOHN_DOE42/!attach/contact/eid:user1")
+
+
+@pytest.mark.asyncio
+async def test_detach_posts_to_detach_endpoint_without_body(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    await rest_api.detach("opportunity", "379", "file", "398")
+    args, kwargs = rest_api._request.await_args
+    assert args == (
+        "POST",
+        "/record/v1/opportunity/379/!detach/file/398",
+    )
+    # Detach sends no body at all.
+    assert "json" not in kwargs
+
+
+@pytest.mark.asyncio
+async def test_create_form_posts_transform_with_accept_header(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"id": "1"})  # type: ignore[method-assign]
+    await rest_api.create_form("salesOrder", "1", "itemFulfillment")
+    args, kwargs = rest_api._request.await_args
+    assert args == (
+        "POST",
+        "/record/v1/salesOrder/1/!transform/itemFulfillment",
+    )
+    assert (
+        kwargs["headers"]["Accept"]
+        == "application/vnd.oracle.resource+json; type=create-form"
+    )
+    assert kwargs["json"] == {}
+
+
+@pytest.mark.asyncio
+async def test_select_options_uses_post_for_new_instance(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.select_options("customer", "entitystatus")
+    args, kwargs = rest_api._request.await_args
+    assert args == ("POST", "/record/v1/customer")
+    assert kwargs["params"]["fields"] == "entitystatus"
+    assert (
+        kwargs["headers"]["Accept"]
+        == "application/vnd.oracle.resource+json; type=select-options"
+    )
+
+
+@pytest.mark.asyncio
+async def test_select_options_uses_patch_for_existing_instance(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.select_options(
+        "advInterCompanyJournalEntry",
+        ["line.dueToFromSubsidiary", "subsidiary"],
+        record_id="5",
+        body={"subsidiary": {"id": 1}},
+    )
+    args, kwargs = rest_api._request.await_args
+    assert args == ("PATCH", "/record/v1/advInterCompanyJournalEntry/5")
+    # Multiple fields are comma-joined; dependent values ride in the body.
+    assert kwargs["params"]["fields"] == "line.dueToFromSubsidiary,subsidiary"
+    assert kwargs["json"] == {"subsidiary": {"id": 1}}
+
+
+@pytest.mark.asyncio
+async def test_batch_sets_async_headers_and_returns_job_location(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    job_url = "https://x.suitetalk.api.netsuite.com/services/rest/async/v1/job/42"
+    fake_resp = SimpleNamespace(
+        status_code=202,
+        text="",
+        headers={"Location": job_url},
+    )
+    rest_api._request_impl = AsyncMock(return_value=fake_resp)  # type: ignore[method-assign]
+    result = await rest_api.batch(
+        "salesOrder",
+        [{"name": "item 1"}, {"name": "item 2"}],
+        idempotency_key="abc-123",
+    )
+    args, kwargs = rest_api._request_impl.await_args
+    assert args == ("POST", "/record/v1/salesOrder")
+    assert kwargs["headers"]["Prefer"] == "respond-async"
+    assert (
+        kwargs["headers"]["Content-Type"]
+        == "application/vnd.oracle.resource+json; type=collection"
+    )
+    assert kwargs["headers"]["X-NetSuite-idempotency-key"] == "abc-123"
+    assert kwargs["json"] == {"items": [{"name": "item 1"}, {"name": "item 2"}]}
+    assert result == {"status_code": 202, "location": job_url, "body": None}
+
+
+@pytest.mark.asyncio
+async def test_batch_rejects_non_write_methods(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock()  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match="batch\\(\\) method must be"):
+        await rest_api.batch("salesOrder", [], method="GET")
+    rest_api._request_impl.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_batch_raises_on_error_status(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    fake_resp = SimpleNamespace(status_code=400, text="bad request", headers={})
+    rest_api._request_impl = AsyncMock(return_value=fake_resp)  # type: ignore[method-assign]
+    with pytest.raises(NetsuiteAPIRequestError):
+        await rest_api.batch("salesOrder", [{"name": "x"}], method="PATCH")
