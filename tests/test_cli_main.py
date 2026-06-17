@@ -9,9 +9,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# main imports cli.misc, which imports the deprecated pkg_resources.
-pytest.importorskip("pkg_resources")
-
 # `netsuite.cli` re-exports the `main` function, shadowing the submodule, so
 # import the module object explicitly.
 cli_main = importlib.import_module("netsuite.cli.main")

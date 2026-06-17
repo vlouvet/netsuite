@@ -2,17 +2,13 @@
 config loading helpers. Does not invoke any real NetSuite calls."""
 
 import argparse
+import importlib
 from unittest.mock import patch
 
 import pytest
 
-# `netsuite.cli.misc` imports the deprecated `pkg_resources`, which was
-# removed from setuptools 81+. Skip the whole CLI test module if it isn't
-# importable so the rest of the suite still runs on newer Pythons.
-pytest.importorskip("pkg_resources")
-
-import importlib  # noqa: E402
-
+# `netsuite.cli` re-exports the `main` function, shadowing the submodule, so
+# import the module object explicitly.
 cli_main_module = importlib.import_module("netsuite.cli.main")
 from netsuite.cli import helpers, misc  # noqa: E402
 from netsuite.cli import rest_api as cli_rest_api  # noqa: E402
