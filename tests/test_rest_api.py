@@ -370,3 +370,113 @@ async def test_create_record_raises_on_error_status(dummy_config):
     )
     with pytest.raises(NetsuiteAPIRequestError):
         await rest_api.create_record("customer", {"bad": "data"})
+
+
+@pytest.mark.asyncio
+async def test_batch_parses_json_body_when_present(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    fake_resp = SimpleNamespace(
+        status_code=200,
+        text='{"results": [1, 2]}',
+        headers={"Location": "https://x/job/1"},
+    )
+    rest_api._request_impl = AsyncMock(return_value=fake_resp)  # type: ignore[method-assign]
+    result = await rest_api.batch("salesOrder", [{"name": "x"}])
+    assert result["body"] == {"results": [1, 2]}
+
+
+@pytest.mark.asyncio
+async def test_batch_tolerates_non_json_body(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    fake_resp = SimpleNamespace(status_code=200, text="not json", headers={})
+    rest_api._request_impl = AsyncMock(return_value=fake_resp)  # type: ignore[method-assign]
+    result = await rest_api.batch("salesOrder", [{"name": "x"}])
+    assert result["body"] is None
+
+
+# ---------------------------------------------------------------------------
+# Plain HTTP verbs + metadata helpers
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_request_delegates_to_request_impl(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request_impl = AsyncMock(return_value="resp")  # type: ignore[method-assign]
+    out = await rest_api.request("GET", "/x", params={"a": 1})
+    assert out == "resp"
+    args, _ = rest_api._request_impl.await_args
+    assert args == ("GET", "/x")
+
+
+@pytest.mark.parametrize(
+    "verb,method",
+    [
+        ("get", "GET"),
+        ("post", "POST"),
+        ("put", "PUT"),
+        ("patch", "PATCH"),
+        ("delete", "DELETE"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_http_verbs_delegate_to_request(dummy_config, verb, method):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={"ok": 1})  # type: ignore[method-assign]
+    out = await getattr(rest_api, verb)("/sub")
+    assert out == {"ok": 1}
+    args, _ = rest_api._request.await_args
+    assert args[0] == method
+    assert args[1] == "/sub"
+
+
+@pytest.mark.asyncio
+async def test_jsonschema_sets_accept_header(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.jsonschema("salesOrder")
+    args, kwargs = rest_api._request.await_args
+    assert args == ("GET", "/record/v1/metadata-catalog/salesOrder")
+    assert kwargs["headers"]["Accept"] == "application/schema+json"
+
+
+@pytest.mark.asyncio
+async def test_token_info_overrides_url_to_restlets_host(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.token_info()
+    _, kwargs = rest_api._request.await_args
+    assert kwargs["url"].endswith("/rest/tokeninfo")
+    assert "restlets.api.netsuite.com" in kwargs["url"]
+
+
+@pytest.mark.asyncio
+async def test_openapi_sets_accept_and_select_param(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.openapi(["customer", "invoice"])
+    args, kwargs = rest_api._request.await_args
+    assert args == ("GET", "/record/v1/metadata-catalog")
+    assert kwargs["headers"]["Accept"] == "application/swagger+json"
+    assert kwargs["params"]["select"] == "customer,invoice"
+
+
+@pytest.mark.asyncio
+async def test_openapi_without_record_types_omits_select(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    rest_api._request = AsyncMock(return_value={})  # type: ignore[method-assign]
+    await rest_api.openapi()
+    _, kwargs = rest_api._request.await_args
+    assert "select" not in kwargs["params"]
+
+
+def test_make_url_and_default_headers(dummy_config):
+    rest_api = NetSuiteRestApi(dummy_config)
+    url = rest_api._make_url("/record/v1/customer")
+    assert url == (
+        "https://123456-sb1.suitetalk.api.netsuite.com"
+        "/services/rest/record/v1/customer"
+    )
+    headers = rest_api._make_default_headers()
+    assert headers["Content-Type"] == "application/json"
+    assert headers["X-NetSuite-PropertyNameValidation"] == "error"
