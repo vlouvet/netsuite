@@ -13,6 +13,7 @@ from joserfc import jwt as jose_jwt
 from joserfc.jwk import RSAKey
 
 from netsuite.oauth2 import (
+    DEFAULT_ALGORITHM,
     DEFAULT_SCOPES,
     JWT_BEARER_ASSERTION_TYPE,
     OAuth2BearerAuth,
@@ -124,6 +125,25 @@ def test_client_assertion_carries_required_claims(rsa_private_key_pem, rsa_publi
     assert claims["iat"] == 1_700_000_000
     # NetSuite caps `exp` at iat + 3600.
     assert claims["exp"] == 1_700_000_000 + 3600
+
+
+def test_client_assertion_signs_with_default_algorithm(
+    rsa_private_key_pem, rsa_public_jwk
+):
+    """Regression: the module default is PS256, which joserfc's default
+    registry rejects unless the algorithm is explicitly whitelisted in
+    `jwt.encode`. Every other assertion test pins RS256, so the default
+    path went uncovered. Build with no `algorithm=` and confirm it signs."""
+    assert DEFAULT_ALGORITHM == "PS256"
+    assertion = build_client_assertion(
+        "123456_SB1",
+        client_id="my-app",
+        certificate_id="cert-kid-42",
+        private_key_pem=rsa_private_key_pem,
+    )
+    decoded = jose_jwt.decode(assertion, rsa_public_jwk, algorithms=[DEFAULT_ALGORITHM])
+    assert decoded.header["alg"] == "PS256"
+    assert decoded.header["kid"] == "cert-kid-42"
 
 
 def test_client_assertion_clamps_ttl_to_one_hour(rsa_private_key_pem, rsa_public_jwk):

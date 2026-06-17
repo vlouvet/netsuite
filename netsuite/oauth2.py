@@ -174,7 +174,11 @@ def build_client_assertion(
         "exp": expires_at,
     }
     key = _load_signing_key(private_key_pem, algorithm)
-    return jwt.encode(header, claims, key)
+    # joserfc's default registry only permits its "recommended" algorithms
+    # (RS256/ES256/...), and rejects PS256 — which is this module's default,
+    # and NetSuite's recommended assertion algorithm. Explicitly whitelist the
+    # chosen algorithm so every entry in SUPPORTED_ALGORITHMS actually signs.
+    return jwt.encode(header, claims, key, algorithms=[algorithm])
 
 
 # ---------------------------------------------------------------------------
