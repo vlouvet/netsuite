@@ -449,6 +449,55 @@ class NetSuiteRestApi(rest_api_base.RestApiBase):
             "body": body,
         }
 
+    async def create_record(
+        self,
+        record_type: str,
+        record_data: Dict[str, Any],
+        **request_kw,
+    ) -> Union[int, str, None]:
+        """
+        Create a record and return the internal ID NetSuite assigns to it.
+
+        POSTs `record_data` to `/record/v1/{record_type}`. NetSuite answers a
+        successful create with HTTP 204 No Content and a `Location` header
+        pointing at the new record; this parses the trailing ID segment and
+        returns it as an `int` when numeric, or the raw string for external
+        IDs (`eid:...`). Returns `None` if NetSuite omits the `Location`
+        header.
+
+        Talks to the lower-level request layer directly (like `batch`)
+        because the new record's ID is only exposed in the `Location`
+        response header, which the JSON helper `_request` discards.
+
+        https://docs.oracle.com/en/cloud/saas/netsuite/ns-online-help/section_1545141395.html
+        """
+        resp = await self._request_impl(
+            "POST",
+            f"/record/v1/{record_type}",
+            json=record_data,
+            **request_kw,
+        )
+        if resp.status_code < 200 or resp.status_code > 299:
+            raise NetsuiteAPIRequestError(resp.status_code, resp.text)
+        return self._parse_id_from_location(resp.headers.get("Location"))
+
+    @staticmethod
+    def _parse_id_from_location(location: Optional[str]) -> Union[int, str, None]:
+        """Extract the record ID (last path segment) from a `Location` URL,
+        ignoring any query string or fragment and tolerating a trailing
+        slash. Returns an `int` for numeric IDs, the raw string otherwise,
+        or `None` when no usable segment is present."""
+        if not location:
+            return None
+        path = location.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+        record_id = path.rsplit("/", 1)[-1]
+        if not record_id:
+            return None
+        try:
+            return int(record_id)
+        except ValueError:
+            return record_id
+
     def _make_hostname(self):
         return f"{self._config.account_slugified}.suitetalk.api.netsuite.com"
 
