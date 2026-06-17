@@ -1,7 +1,9 @@
 """OAuth 2.0 support for NetSuite.
 
-NetSuite is sunsetting SOAP Web Services in the 2027.1 release. The
-recommended path forward is the REST API authenticated via OAuth 2.0.
+NetSuite is gradually removing SOAP Web Services (2025.2 is the last
+planned SOAP endpoint, with older endpoints losing support over the
+following releases). The recommended path forward is the REST API
+authenticated via OAuth 2.0.
 This module implements the two flows that matter for a backend library:
 
 * **Client Credentials with JWT Bearer Assertion** (RFC 7523 — *machine-
