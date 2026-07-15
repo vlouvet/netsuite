@@ -42,3 +42,38 @@ def test_soap_api_is_constructed(dummy_config):
         warnings.simplefilter("ignore", DeprecationWarning)
         soap = ns.soap_api
     assert ns.soap_api is soap
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle — closing the sub-clients' connection pools
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_the_sub_apis_that_were_used(dummy_config):
+    ns = NetSuite(dummy_config)
+    ns.rest_api._client  # instantiate both, and their clients
+    ns.restlet._client
+
+    await ns.aclose()
+
+    assert ns.rest_api._client.is_closed
+    assert ns.restlet._client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_aclose_does_not_construct_unused_sub_apis(dummy_config):
+    """Reaching for `ns.rest_api` here would build the very thing we're
+    trying to avoid — a client just to close it."""
+    ns = NetSuite(dummy_config)
+    await ns.aclose()
+    assert "rest_api" not in ns.__dict__
+    assert "restlet" not in ns.__dict__
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_closes_sub_apis(dummy_config):
+    async with NetSuite(dummy_config) as ns:
+        client = ns.rest_api._client
+        assert not client.is_closed
+    assert client.is_closed
