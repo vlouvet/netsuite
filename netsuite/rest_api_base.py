@@ -1,6 +1,7 @@
 import asyncio
 import functools
 import logging
+import random
 import time
 from functools import cached_property
 
@@ -28,6 +29,13 @@ __all__ = ("RestApiBase",)
 
 DEFAULT_SIGNATURE_METHOD = "HMAC-SHA256"
 
+# NetSuite answers HTTP 429 when the account's concurrent-request limit is
+# exhausted (`CONCURRENCY_LIMIT_EXCEEDED`). The request was rejected, not
+# executed, so re-sending it is safe for writes as well as reads.
+DEFAULT_MAX_RETRIES_ON_429 = 5
+_RETRY_BACKOFF_BASE_SECONDS = 1.0
+_RETRY_BACKOFF_MAX_SECONDS = 30.0
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,6 +52,7 @@ class RestApiBase:
     _concurrent_requests: int = 10
     _default_timeout: int = 10
     _signature_method: str = DEFAULT_SIGNATURE_METHOD
+    _max_retries_on_429: int = DEFAULT_MAX_RETRIES_ON_429
 
     @cached_property
     def _request_semaphore(self) -> asyncio.Semaphore:
@@ -83,21 +92,50 @@ class RestApiBase:
             f"Making {method.upper()} request to {url}. Keyword arguments: {kw}"
         )
 
-        async with self._request_semaphore:
-            async with httpx.AsyncClient(verify=shared_ssl_context()) as c:
-                resp = await c.request(
-                    method=method,
-                    url=url,
-                    headers=headers,
-                    auth=self._make_auth(),
-                    timeout=timeout,
-                    **kw,
-                )
+        attempt = 0
+        while True:
+            async with self._request_semaphore:
+                async with httpx.AsyncClient(verify=shared_ssl_context()) as c:
+                    resp = await c.request(
+                        method=method,
+                        url=url,
+                        headers=headers,
+                        auth=self._make_auth(),
+                        timeout=timeout,
+                        **kw,
+                    )
+            if resp.status_code != 429 or attempt >= self._max_retries_on_429:
+                break
+            attempt += 1
+            delay = self._retry_delay(resp, attempt)
+            logger.warning(
+                f"NetSuite returned HTTP 429 for {method} {url}; "
+                f"retry {attempt}/{self._max_retries_on_429} in {delay:.1f}s"
+            )
+            # Sleep outside the semaphore so a backing-off request doesn't
+            # hold a concurrency slot.
+            await asyncio.sleep(delay)
 
         resp_headers_json = json.dumps(dict(resp.headers))
         logger.debug(f"Got response headers from NetSuite: {resp_headers_json}")
 
         return resp
+
+    @staticmethod
+    def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+        """Seconds to wait before retry number `attempt` (1-based).
+
+        Honours a numeric `Retry-After` header; otherwise exponential
+        backoff with jitter so concurrent callers don't retry in lockstep.
+        """
+        retry_after = resp.headers.get("Retry-After", "")
+        try:
+            return min(max(float(retry_after), 0.0), _RETRY_BACKOFF_MAX_SECONDS)
+        except ValueError:
+            pass
+        backoff = _RETRY_BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
+        jitter = random.uniform(0, _RETRY_BACKOFF_BASE_SECONDS)
+        return min(backoff + jitter, _RETRY_BACKOFF_MAX_SECONDS)
 
     def _make_url(self, subpath: str):
         raise NotImplementedError
