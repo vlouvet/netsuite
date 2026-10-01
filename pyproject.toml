@@ -34,6 +34,9 @@ httpx = ">=0.25,<0.29"
 # so declare it explicitly to keep CI installs deterministic.
 joserfc = ">=1,<2"
 pydantic = "^2.4.2"
+# Trust store for the shared TLS context (netsuite/_tls.py). httpx already
+# depends on it; declared because we import it directly.
+certifi = "*"
 orjson = { version = "~3", optional = true }
 ipython = { version = "~8", optional = true, python = "^3.9" }
 zeep = { version = "~4", optional = true, extras = ["async"] }
