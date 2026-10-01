@@ -38,6 +38,7 @@ from joserfc import jwt
 from joserfc.jwk import ECKey, RSAKey
 
 from . import json as nsjson
+from ._tls import shared_ssl_context
 
 __all__ = (
     "DEFAULT_SCOPES",
@@ -229,7 +230,9 @@ async def _post_token(
     *,
     timeout: float = 30.0,
 ) -> OAuth2Token:
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(
+        timeout=timeout, verify=shared_ssl_context()
+    ) as client:
         resp = await client.post(
             url,
             data=data,

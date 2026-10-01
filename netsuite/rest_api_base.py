@@ -11,6 +11,7 @@ from authlib.oauth1.rfc5849.signature import generate_signature_base_string
 from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha256
 
 from . import json
+from ._tls import shared_ssl_context
 from .config import (
     OAuth2AccessTokenAuth,
     OAuth2ClientCredentialsAuth,
@@ -83,7 +84,7 @@ class RestApiBase:
         )
 
         async with self._request_semaphore:
-            async with httpx.AsyncClient() as c:
+            async with httpx.AsyncClient(verify=shared_ssl_context()) as c:
                 resp = await c.request(
                     method=method,
                     url=url,
