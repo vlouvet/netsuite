@@ -1,5 +1,33 @@
 # Changelog
 
+## Unreleased (vlouvet fork)
+
+This fork continues the package after upstream's last release (0.12.0, March 2024)
+and last commit (March 2025). Everything in this section exists only in the fork;
+install with `pip install git+https://github.com/vlouvet/netsuite.git`.
+
+### Features
+
+* **oauth2:** OAuth 2.0 Client Credentials (certificate / JWT assertion) and Authorization Code auth (#11); sign with the configured algorithm so the PS256 default works (#24)
+* **rest:** 2026.1 REST web services operation helpers (#22); `create_record()` that returns the new record's id (#25); `suiteql_paginated()` that follows `next` links (#6); warning on SuiteQL `ORDER BY` with a small `limit` (#7)
+* **http:** one TLS context per process and automatic retry with backoff on HTTP 429 `CONCURRENCY_LIMIT_EXCEEDED` (#27); one pooled `httpx.AsyncClient` per API object with keep-alive, `aclose()` / `async with`, and bring-your-own client
+* **soap:** default WSDL 2024.2 (#12); WSDL version as a config parameter (#3); runtime `DeprecationWarning` that states NetSuite's removal timeline (#20)
+
+### Bug Fixes
+
+* **soap:** the `WebServiceCall` decorator was silently bypassed (#4)
+* **json:** the encoder called its default hook twice (#8)
+
+### Dependencies and tooling
+
+* Python 3.10+; CI runs the suite on 3.10 through 3.14
+* httpx `>=0.25,<0.29` (#2); oauthlib `>=3.2,<5` by signing through `sign_hmac_sha256_with_client`; pytest 8 or 9, pytest-asyncio 0.23 through 1.x, pytest-cov 6 or 7
+* Test coverage from 46% to 91% (#5, #8, #26); SOAP client tests from 3 to 29 (#5)
+
+### Known
+
+* authlib 1.9 deprecates its `httpx` integration in favour of `httpx2` and warns on import; the fork still targets `httpx`, and a migration is tracked separately.
+
 ## [0.12.0](https://github.com/jacobsvante/netsuite/compare/v0.11.0...v0.12.0) (2024-03-01)
 
 

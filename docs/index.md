@@ -15,7 +15,7 @@ With default features (REST API + Restlet support):
 
     pip install git+https://github.com/vlouvet/netsuite.git
 
-With Web Services SOAP API support (deprecated by NetSuite as of the 2027.1 release):
+With Web Services SOAP API support (on NetSuite's removal path, see the note below):
 
     pip install "netsuite[soap_api] @ git+https://github.com/vlouvet/netsuite.git"
 
@@ -42,7 +42,7 @@ The library supports three authentication methods:
 | `OAuth2AccessTokenAuth` | Bring-your-own access token | When an upstream auth flow (e.g. Authorization Code in your web app) already has a token. |
 | `TokenAuth` | OAuth 1.0a Token-Based Auth (TBA) | Legacy. Still works, but new integrations should use OAuth 2.0. |
 
-> **Note on SOAP.** NetSuite has announced that SOAP Web Services will be removed in the **2027.1 release**. Plan REST + OAuth 2.0 migrations accordingly. Instantiating `NetSuiteSoapApi` emits a `DeprecationWarning` to surface this at runtime.
+> **Note on SOAP.** NetSuite's published removal plan: 2025.2 is the last planned SOAP endpoint, new SOAP integrations are no longer possible from **2027.1**, only the last endpoint is supported from 2027.2, and **all SOAP endpoints are disabled in 2028.2**. Plan REST + OAuth 2.0 migrations accordingly. Instantiating `NetSuiteSoapApi` emits a `DeprecationWarning` to surface this at runtime.
 
 ### OAuth 2.0 — Client Credentials (M2M, JWT Bearer)
 

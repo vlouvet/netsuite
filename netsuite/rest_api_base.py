@@ -4,12 +4,13 @@ import logging
 import random
 import time
 from functools import cached_property
+from types import SimpleNamespace
 
 import httpx
 from authlib.integrations.httpx_client import OAuth1Auth
 from authlib.oauth1.rfc5849.client_auth import ClientAuth
 from authlib.oauth1.rfc5849.signature import generate_signature_base_string
-from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha256
+from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha256_with_client
 
 from . import json
 from ._tls import shared_ssl_context
@@ -42,7 +43,17 @@ logger = logging.getLogger(__name__)
 def authlib_hmac_sha256_sign_method(client, request):
     """Sign a HMAC-SHA256 signature."""
     base_string = generate_signature_base_string(request)
-    return sign_hmac_sha256(base_string, client.client_secret, client.token_secret)
+    # oauthlib's `*_with_client` form reads `.client_secret` and
+    # `.resource_owner_secret`; authlib's client calls the latter
+    # `.token_secret`. Adapt the names rather than call the positional
+    # `sign_hmac_sha256`, which oauthlib 3.3+ deprecates and 4.x warns on.
+    return sign_hmac_sha256_with_client(
+        base_string,
+        SimpleNamespace(
+            client_secret=client.client_secret,
+            resource_owner_secret=client.token_secret,
+        ),
+    )
 
 
 ClientAuth.register_signature_method("HMAC-SHA256", authlib_hmac_sha256_sign_method)
