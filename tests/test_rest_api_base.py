@@ -292,22 +292,47 @@ async def test_request_semaphore_is_lazily_created_and_caches(dummy_config):
 
 
 def test_authlib_hmac_sha256_signs_via_oauthlib():
-    """The custom signing method should defer to oauthlib's `sign_hmac_sha256`
-    using authlib's signature base string."""
+    """The custom signing method should defer to oauthlib's
+    `sign_hmac_sha256_with_client` using authlib's signature base string,
+    mapping authlib's `token_secret` onto oauthlib's `resource_owner_secret`."""
     fake_request = MagicMock()
     fake_client = MagicMock(client_secret="secret", token_secret="ts")
     with patch(
         "netsuite.rest_api_base.generate_signature_base_string",
         return_value="base",
     ) as mock_base, patch(
-        "netsuite.rest_api_base.sign_hmac_sha256",
+        "netsuite.rest_api_base.sign_hmac_sha256_with_client",
         return_value="signed",
     ) as mock_sign:
         sig = authlib_hmac_sha256_sign_method(fake_client, fake_request)
 
     mock_base.assert_called_once_with(fake_request)
-    mock_sign.assert_called_once_with("base", "secret", "ts")
+    mock_sign.assert_called_once()
+    base_string, oauthlib_client = mock_sign.call_args.args
+    assert base_string == "base"
+    assert oauthlib_client.client_secret == "secret"
+    assert oauthlib_client.resource_owner_secret == "ts"
     assert sig == "signed"
+
+
+def test_authlib_hmac_sha256_matches_oauthlib_reference():
+    """End to end against the real oauthlib: the adapter must produce the same
+    bytes the positional (deprecated) form did, or every signed request
+    would start failing with 401s."""
+    import warnings
+
+    from oauthlib.oauth1.rfc5849.signature import sign_hmac_sha256
+
+    fake_client = MagicMock(client_secret="secret", token_secret="ts")
+    with patch(
+        "netsuite.rest_api_base.generate_signature_base_string",
+        return_value="GET&https%3A%2F%2Fx%2Fy&a%3D1",
+    ):
+        sig = authlib_hmac_sha256_sign_method(fake_client, MagicMock())
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        expected = sign_hmac_sha256("GET&https%3A%2F%2Fx%2Fy&a%3D1", "secret", "ts")
+    assert sig == expected
 
 
 def test_hmac_sha256_method_is_registered_on_authlib():

@@ -18,7 +18,7 @@ Pin to a specific commit or tag:
 
     pip install git+https://github.com/vlouvet/netsuite.git@<commit-sha-or-tag>
 
-With Web Services SOAP API support (deprecated by NetSuite as of the 2027.1 release — prefer REST + OAuth 2.0 for new integrations):
+With Web Services SOAP API support (on NetSuite's removal path: no new SOAP integrations from 2027.1 and every SOAP endpoint disabled in 2028.2 — prefer REST + OAuth 2.0 for new integrations):
 
     pip install "netsuite[soap_api] @ git+https://github.com/vlouvet/netsuite.git"
 
