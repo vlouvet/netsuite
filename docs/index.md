@@ -159,6 +159,46 @@ if __name__ == "__main__":
 
 ```
 
+## Programmatic use - Closing connections
+
+`rest_api` and `restlet` each keep one HTTP client — and so one connection
+pool — for their lifetime, which is what makes back-to-back requests reuse
+connections instead of running a fresh TLS handshake every time.
+
+For a short script you can ignore this; the pool goes away with the process.
+In a long-lived app, close it when you're done, either with `async with`:
+
+```python
+async with NetSuite(config) as ns:
+    await ns.rest_api.get("/record/v1/salesOrder")
+# rest_api and restlet pools are now closed
+```
+
+...or by calling `aclose()` directly, which is what you want when the client
+outlives a single block (e.g. one client shared by a web app):
+
+```python
+ns = NetSuite(config)
+try:
+    await ns.rest_api.get("/record/v1/salesOrder")
+finally:
+    await ns.aclose()
+```
+
+Both work on the sub-clients too (`await ns.rest_api.aclose()`), and are safe
+to call more than once. Leaving a client unclosed raises a `ResourceWarning`.
+
+To bring your own pool, transport, or proxy, pass `client=`. A client you pass
+in is never closed by this library — its lifetime stays yours:
+
+```python
+import httpx
+
+async with httpx.AsyncClient(proxy="http://localhost:8030") as client:
+    ns = NetSuite(config, rest_api_options={"client": client})
+    await ns.rest_api.get("/record/v1/salesOrder")
+```
+
 ## Programmatic use - Search Object by Custom Field Value
 
 ```python

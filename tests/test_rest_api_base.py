@@ -96,12 +96,6 @@ async def test_request_impl_uses_make_url_when_no_url_kwarg(dummy_config):
     captured = {}
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             captured.update(kw)
             return _httpx_response(200, "{}")
@@ -126,12 +120,6 @@ async def test_request_impl_url_kwarg_overrides_subpath(dummy_config):
     captured = {}
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             captured.update(kw)
             return _httpx_response(200, "{}")
@@ -152,12 +140,6 @@ async def test_request_impl_serializes_json_to_data(dummy_config):
     captured = {}
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             captured.update(kw)
             return _httpx_response(200, "{}")
@@ -178,12 +160,6 @@ async def test_request_impl_caller_headers_override_defaults(dummy_config):
     captured = {}
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             captured.update(kw)
             return _httpx_response(200, "{}")
@@ -205,12 +181,6 @@ async def test_request_impl_caller_timeout_overrides_default(dummy_config):
     captured = {}
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             captured.update(kw)
             return _httpx_response(200, "{}")
@@ -226,12 +196,6 @@ async def test_request_impl_logs_at_debug_level(dummy_config, caplog):
     api = _ConcreteApi(dummy_config)
 
     class _FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return False
-
         async def request(self, **kw):
             return _httpx_response(200, "{}", headers={"X-Foo": "bar"})
 
@@ -284,6 +248,207 @@ async def test_request_semaphore_is_lazily_created_and_caches(dummy_config):
     assert isinstance(sem, asyncio.Semaphore)
     # Cached: second access returns the same instance.
     assert api._request_semaphore is sem
+
+
+# ---------------------------------------------------------------------------
+# Client reuse & lifecycle
+# ---------------------------------------------------------------------------
+
+
+# Bound before any test patches `httpx.AsyncClient` — patching the attribute
+# on the module reaches this module's `httpx` too, so the helper below would
+# otherwise call the mock it exists to feed.
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
+
+
+def _mock_transport_client(**kw):
+    """A real `httpx.AsyncClient` that answers every request locally, so we
+    exercise httpx's own pooling/closing rather than a stand-in."""
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+    return _REAL_ASYNC_CLIENT(transport=transport, **kw)
+
+
+@pytest.mark.asyncio
+async def test_client_is_lazily_created_and_cached(dummy_config):
+    api = _ConcreteApi(dummy_config)
+    # Nothing built until first use — the client must bind to the running
+    # loop, not to whatever loop existed at construction time.
+    assert "_client" not in api.__dict__
+    client = api._client
+    assert isinstance(client, httpx.AsyncClient)
+    assert api._client is client
+    await api.aclose()
+
+
+@pytest.mark.asyncio
+async def test_client_is_reused_across_requests(dummy_config):
+    """The regression this whole change exists for: one client for the object's
+    lifetime, not one per request. A per-request client re-parses the certifi
+    CA bundle and forgoes keep-alive."""
+    api = _ConcreteApi(dummy_config)
+    clients = []
+
+    def _factory(**kw):
+        clients.append(_mock_transport_client(**kw))
+        return clients[-1]
+
+    with patch("netsuite.rest_api_base.httpx.AsyncClient", side_effect=_factory):
+        for _ in range(3):
+            await api._request_impl("GET", "/x")
+
+    assert len(clients) == 1, "expected a single client across 3 requests"
+    assert not clients[0].is_closed, "client must stay open between requests"
+    await api.aclose()
+
+
+@pytest.mark.asyncio
+async def test_client_pool_limits_follow_concurrent_requests(dummy_config):
+    api = _ConcreteApi(dummy_config)  # `_concurrent_requests` == 5
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ) as mock_client:
+        api._client
+
+    limits = mock_client.call_args.kwargs["limits"]
+    assert limits.max_connections == 5
+    assert limits.max_keepalive_connections == 5
+    await api.aclose()
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_the_client(dummy_config):
+    api = _ConcreteApi(dummy_config)
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        await api._request_impl("GET", "/x")
+    client = api._client
+    await api.aclose()
+    assert client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_aclose_is_idempotent_and_safe_before_any_request(dummy_config):
+    api = _ConcreteApi(dummy_config)
+    # Never used: must not construct a client just to close it.
+    await api.aclose()
+    assert "_client" not in api.__dict__
+
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        await api._request_impl("GET", "/x")
+    await api.aclose()
+    await api.aclose()  # second close must not raise
+
+
+@pytest.mark.asyncio
+async def test_async_context_manager_closes_client(dummy_config):
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        async with _ConcreteApi(dummy_config) as api:
+            await api._request_impl("GET", "/x")
+            client = api._client
+            assert not client.is_closed
+    assert client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_injected_client_is_used_and_never_closed(dummy_config):
+    """A caller-supplied client belongs to the caller: we must use it and
+    leave it open."""
+    injected = _mock_transport_client()
+    api = _ConcreteApi(dummy_config)
+    api._provided_client = injected
+
+    with patch("netsuite.rest_api_base.httpx.AsyncClient") as mock_client:
+        resp = await api._request_impl("GET", "/x")
+
+    assert resp.status_code == 200
+    assert api._client is injected
+    mock_client.assert_not_called()  # we must not build one of our own
+
+    await api.aclose()
+    assert not injected.is_closed, "aclose() must not close a client we don't own"
+    await injected.aclose()
+
+
+@pytest.mark.asyncio
+async def test_del_warns_about_an_unclosed_client(dummy_config):
+    api = _ConcreteApi(dummy_config)
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        await api._request_impl("GET", "/x")
+    client = api._client
+
+    with pytest.warns(ResourceWarning, match="Unclosed _ConcreteApi"):
+        api.__del__()
+
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_del_stays_quiet_once_closed(dummy_config, recwarn):
+    api = _ConcreteApi(dummy_config)
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        await api._request_impl("GET", "/x")
+    await api.aclose()
+
+    api.__del__()
+    assert not [w for w in recwarn if issubclass(w.category, ResourceWarning)]
+
+
+def test_del_is_quiet_when_no_client_was_ever_built(dummy_config, recwarn):
+    _ConcreteApi(dummy_config).__del__()
+    assert not [w for w in recwarn if issubclass(w.category, ResourceWarning)]
+
+
+def test_object_survives_a_second_event_loop(dummy_config):
+    """A cached client and semaphore bind to the loop they're first used on.
+    Reusing one object across `asyncio.run()` calls — a module-level client in
+    a worker, say — worked when every request built its own client, so it must
+    keep working. Deliberately not an `asyncio` test: it drives its own loops.
+    """
+    api = _ConcreteApi(dummy_config)
+
+    with patch(
+        "netsuite.rest_api_base.httpx.AsyncClient", side_effect=_mock_transport_client
+    ):
+        asyncio.run(api._request_impl("GET", "/x"))
+        first, first_loop = api._client, api._loop
+
+        # Second `asyncio.run` — a brand new loop. Old code raised
+        # "Event loop is closed" here.
+        asyncio.run(api._request_impl("GET", "/x"))
+
+    assert api._client is not first, "client must be rebuilt for the new loop"
+    assert api._loop is not first_loop
+    asyncio.run(api.aclose())
+
+
+def test_same_loop_keeps_one_client_across_many_requests(dummy_config):
+    """The rebind check must not fire within a single loop — that would put us
+    back to a client per request."""
+    api = _ConcreteApi(dummy_config)
+    clients = []
+
+    def _factory(**kw):
+        clients.append(_mock_transport_client(**kw))
+        return clients[-1]
+
+    async def _drive():
+        for _ in range(5):
+            await api._request_impl("GET", "/x")
+        await api.aclose()
+
+    with patch("netsuite.rest_api_base.httpx.AsyncClient", side_effect=_factory):
+        asyncio.run(_drive())
+
+    assert len(clients) == 1
 
 
 # ---------------------------------------------------------------------------

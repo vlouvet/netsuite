@@ -3,7 +3,9 @@ import functools
 import logging
 import random
 import time
+import warnings
 from functools import cached_property
+from typing import Optional
 
 import httpx
 from authlib.integrations.httpx_client import OAuth1Auth
@@ -53,12 +55,63 @@ class RestApiBase:
     _default_timeout: int = 10
     _signature_method: str = DEFAULT_SIGNATURE_METHOD
     _max_retries_on_429: int = DEFAULT_MAX_RETRIES_ON_429
+    # Set when the caller brings their own client. We then never close it —
+    # its lifetime is theirs to manage, not ours.
+    _provided_client: Optional[httpx.AsyncClient] = None
+    # The event loop `_client` and `_request_semaphore` are bound to.
+    _loop: Optional[asyncio.AbstractEventLoop] = None
 
     @cached_property
     def _request_semaphore(self) -> asyncio.Semaphore:
         # NOTE: Shouldn't be put in __init__ as we might not have a running
         #       event loop at that time.
         return asyncio.Semaphore(self._concurrent_requests)
+
+    @cached_property
+    def _client(self) -> httpx.AsyncClient:
+        # NOTE: Lazy for the same reason as `_request_semaphore` — the client
+        #       binds to the running event loop, which may not exist at
+        #       __init__ time.
+        #
+        #       One client for the lifetime of this object, rather than one
+        #       per request: a fresh client rebuilds the TLS context and
+        #       re-parses the certifi CA bundle every time, which dominates
+        #       CPU on request-heavy workloads (paginated SuiteQL, bulk
+        #       fetches), and forgoes connection keep-alive.
+        if self._provided_client is not None:
+            return self._provided_client
+        return httpx.AsyncClient(
+            # One parsed CA bundle for the process (see _tls.py); the client
+            # itself is reused, so this now only matters across instances.
+            verify=shared_ssl_context(),
+            # The semaphore already caps in-flight requests at this number,
+            # so the pool never needs to grow past it.
+            limits=httpx.Limits(
+                max_connections=self._concurrent_requests,
+                max_keepalive_connections=self._concurrent_requests,
+            ),
+        )
+
+    def _rebind_to_running_loop(self) -> None:
+        """Drop loop-bound state if we've been carried to a new event loop.
+
+        Both an httpx client and an `asyncio.Semaphore` bind to the loop they
+        are first used on. Holding one object across two loops — a
+        module-level client driven by repeated `asyncio.run()` calls, say —
+        worked before only because every request built its own client. Rebuild
+        rather than raise `Event loop is closed` at those callers.
+
+        The abandoned client can't be closed from here — closing it needs the
+        loop it was bound to, which is gone. We drop our reference and leave
+        its sockets to the garbage collector.
+        """
+        loop = asyncio.get_running_loop()
+        if self._loop is loop:
+            return
+        if self._loop is not None:
+            self.__dict__.pop("_client", None)
+            self.__dict__.pop("_request_semaphore", None)
+        self._loop = loop
 
     async def _request(self, method: str, subpath: str, **request_kw):
         resp = await self._request_impl(method, subpath, **request_kw)
@@ -92,18 +145,20 @@ class RestApiBase:
             f"Making {method.upper()} request to {url}. Keyword arguments: {kw}"
         )
 
+        # Before touching the semaphore — it's loop-bound too.
+        self._rebind_to_running_loop()
+
         attempt = 0
         while True:
             async with self._request_semaphore:
-                async with httpx.AsyncClient(verify=shared_ssl_context()) as c:
-                    resp = await c.request(
-                        method=method,
-                        url=url,
-                        headers=headers,
-                        auth=self._make_auth(),
-                        timeout=timeout,
-                        **kw,
-                    )
+                resp = await self._client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    auth=self._make_auth(),
+                    timeout=timeout,
+                    **kw,
+                )
             if resp.status_code != 429 or attempt >= self._max_retries_on_429:
                 break
             attempt += 1
@@ -136,6 +191,38 @@ class RestApiBase:
         backoff = _RETRY_BACKOFF_BASE_SECONDS * 2 ** (attempt - 1)
         jitter = random.uniform(0, _RETRY_BACKOFF_BASE_SECONDS)
         return min(backoff + jitter, _RETRY_BACKOFF_MAX_SECONDS)
+
+    async def aclose(self) -> None:
+        """Close the underlying HTTP client and its connection pool.
+
+        A client handed to us by the caller is left open — they own it.
+        Safe to call more than once, and on an object that never made a
+        request.
+        """
+        if self._provided_client is None and "_client" in self.__dict__:
+            await self._client.aclose()
+
+    async def __aenter__(self) -> "RestApiBase":
+        return self
+
+    async def __aexit__(self, exc_type=None, exc_value=None, traceback=None) -> None:
+        await self.aclose()
+
+    def __del__(self) -> None:
+        # Safety net for scripts that never close us. `__del__` can't await,
+        # so all we can do is point at the leak.
+        client = self.__dict__.get("_client")
+        if client is not None and self._provided_client is None:
+            # Anything we can't interrogate (a test double, a half-built
+            # object) is assumed closed: a bogus warning from a destructor is
+            # worse than a missed one, and a raising `__del__` worse still.
+            if not getattr(client, "is_closed", True):
+                warnings.warn(
+                    f"Unclosed {type(self).__name__} — its connection pool was "
+                    f"never released. Use `async with`, or await `aclose()`.",
+                    ResourceWarning,
+                    source=self,
+                )
 
     def _make_url(self, subpath: str):
         raise NotImplementedError

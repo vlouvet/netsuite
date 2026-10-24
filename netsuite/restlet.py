@@ -1,5 +1,8 @@
 import logging
 from functools import cached_property
+from typing import Optional
+
+import httpx
 
 from . import rest_api_base
 from .config import Config
@@ -18,12 +21,17 @@ class NetSuiteRestlet(rest_api_base.RestApiBase):
         concurrent_requests: int = 10,
         signature_method: str = rest_api_base.DEFAULT_SIGNATURE_METHOD,
         max_retries_on_429: int = rest_api_base.DEFAULT_MAX_RETRIES_ON_429,
+        client: Optional[httpx.AsyncClient] = None,
     ):
+        """`client` lets you supply your own httpx client — for a custom
+        transport, proxy, or pool. We never close a client you pass in.
+        Left unset, we create and manage one (see `RestApiBase._client`)."""
         self._config = config
         self._default_timeout = default_timeout
         self._concurrent_requests = concurrent_requests
         self._signature_method = signature_method
         self._max_retries_on_429 = max_retries_on_429
+        self._provided_client = client
 
     @cached_property
     def hostname(self) -> str:

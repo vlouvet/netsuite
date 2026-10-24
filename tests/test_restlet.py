@@ -2,6 +2,7 @@
 
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 
 from netsuite import NetSuiteRestlet
@@ -61,3 +62,16 @@ async def test_default_deploy_is_one(dummy_config):
     await restlet.get(987)
     args, _ = restlet._request.await_args
     assert args == ("GET", "?script=987&deploy=1")
+
+
+@pytest.mark.asyncio
+async def test_injected_client_is_used_verbatim(dummy_config):
+    """`client=` lets callers bring their own pool/transport/proxy. It must be
+    used as-is, and left open for the caller to close."""
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": 1}))
+    async with httpx.AsyncClient(transport=transport) as injected:
+        restlet = NetSuiteRestlet(dummy_config, client=injected)
+        assert restlet._client is injected
+        assert await restlet.get(987) == {"ok": 1}
+        await restlet.aclose()
+        assert not injected.is_closed

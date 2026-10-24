@@ -480,3 +480,16 @@ def test_make_url_and_default_headers(dummy_config):
     headers = rest_api._make_default_headers()
     assert headers["Content-Type"] == "application/json"
     assert headers["X-NetSuite-PropertyNameValidation"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_injected_client_is_used_verbatim(dummy_config):
+    """`client=` lets callers bring their own pool/transport/proxy. It must be
+    used as-is, and left open for the caller to close."""
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={"ok": 1}))
+    async with httpx.AsyncClient(transport=transport) as injected:
+        rest_api = NetSuiteRestApi(dummy_config, client=injected)
+        assert rest_api._client is injected
+        assert await rest_api.get("/record/v1/customer/1") == {"ok": 1}
+        await rest_api.aclose()
+        assert not injected.is_closed

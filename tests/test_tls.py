@@ -109,9 +109,10 @@ async def test_request_impl_reuses_shared_context_across_requests(dummy_config):
         await api._request_impl("GET", "/a")
         await api._request_impl("GET", "/b")
 
-    assert len(captured) == 2
+    # One client for the object's lifetime (see RestApiBase._client), built
+    # once with the process-wide context. Two requests, one construction.
+    assert len(captured) == 1
     assert captured[0]["verify"] is _tls.shared_ssl_context()
-    assert captured[1]["verify"] is captured[0]["verify"]
 
 
 @pytest.mark.asyncio
